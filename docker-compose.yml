@@ -15,6 +15,9 @@ services:
     # наружу не публикуется: только на localhost VDS, для доступа через ssh-туннель
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    # лимиты, чтобы стенды на одном VDS не отбирали ресурсы друг у друга
+    cpus: ${POSTGRES_CPUS:-1}
+    mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
       interval: 5s
@@ -36,6 +39,8 @@ services:
       SPRING_DATASOURCE_HIKARI_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
+    # куча JVM - 75% от mem_limit (MaxRAMPercentage), число потоков GC/пулов JVM считает от cpus
+    cpus: ${BACKEND_CPUS:-1}
     mem_limit: ${BACKEND_MEM_LIMIT:-1g}
     healthcheck:
       test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP" ]

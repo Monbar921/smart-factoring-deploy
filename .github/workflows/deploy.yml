@@ -121,16 +121,22 @@ jobs:
         env:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+          BACKEND_CPUS: ${{ vars.BACKEND_CPUS }}
           BACKEND_MEM_LIMIT: ${{ vars.BACKEND_MEM_LIMIT }}
           POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
+          POSTGRES_CPUS: ${{ vars.POSTGRES_CPUS }}
+          POSTGRES_MEM_LIMIT: ${{ vars.POSTGRES_MEM_LIMIT }}
         run: |
           umask 077
           {
             echo "COMPOSE_PROJECT_NAME=smart-factoring-${ENVIRONMENT}"
             echo "BACKEND_TAG=${BACKEND_TAG}"
             echo "BACKEND_PORT=${BACKEND_PORT:-8080}"
+            echo "BACKEND_CPUS=${BACKEND_CPUS:-1}"
             echo "BACKEND_MEM_LIMIT=${BACKEND_MEM_LIMIT:-1g}"
             echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}"
+            echo "POSTGRES_CPUS=${POSTGRES_CPUS:-1}"
+            echo "POSTGRES_MEM_LIMIT=${POSTGRES_MEM_LIMIT:-512m}"
             echo "POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'"
           } > deploy.env
 

@@ -49,7 +49,10 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `VDS_DIR` | `/opt/smart-factoring/test` | каталог стенда, у каждого окружения свой |
 | Variable | `BACKEND_PORT` | `8081` для test, `8080` для prod | необязательно, по умолчанию 8080 |
 | Variable | `POSTGRES_PORT` | `5433` для test, `5432` для prod | порт на 127.0.0.1 VDS, необязательно |
-| Variable | `BACKEND_MEM_LIMIT` | `1g` | необязательно |
+| Variable | `BACKEND_CPUS` | `1` | лимит CPU backend, можно дробное (`0.5`), необязательно |
+| Variable | `BACKEND_MEM_LIMIT` | `1g` | лимит памяти backend, куча JVM - 75% от него, необязательно |
+| Variable | `POSTGRES_CPUS` | `1` | лимит CPU postgres, необязательно |
+| Variable | `POSTGRES_MEM_LIMIT` | `512m` | лимит памяти postgres, необязательно |
 
 Если test и prod живут на одном VDS, `VDS_HOST`, `VDS_USER`, `VDS_SSH_KEY`, `VDS_KNOWN_HOSTS` можно завести один раз
 в Settings → Secrets and variables → Actions → Repository secrets: секреты окружения их дополняют.
