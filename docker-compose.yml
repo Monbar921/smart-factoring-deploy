@@ -1,0 +1,48 @@
+# Стенд smart-factoring: postgres + backend.
+# Переменные берутся из .env рядом с файлом: на VDS его пишет deploy workflow, локально - копия .env.example
+name: ${COMPOSE_PROJECT_NAME:-smart-factoring}
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smart_factoring}
+      POSTGRES_USER: ${POSTGRES_USER:-smart_factoring}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # наружу не публикуется: только на localhost VDS, для доступа через ssh-туннель
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: ghcr.io/monbar921/smart-factoring-backend:${BACKEND_TAG:?BACKEND_TAG is required}
+    restart: unless-stopped
+    # в образе нет ENTRYPOINT, команда запуска задаётся здесь
+    command: [ "java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar" ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # DataSource собирается из spring.datasource.hikari.* (DatasourceConfiguration в backend)
+      SPRING_DATASOURCE_HIKARI_JDBCURL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-smart_factoring}
+      SPRING_DATASOURCE_HIKARI_USERNAME: ${POSTGRES_USER:-smart_factoring}
+      SPRING_DATASOURCE_HIKARI_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    mem_limit: ${BACKEND_MEM_LIMIT:-1g}
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP" ]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 6
+
+volumes:
+  postgres-data:

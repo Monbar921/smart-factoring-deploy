@@ -1,0 +1,161 @@
+name: Deploy
+
+# Раскатка docker-compose.yml на VDS.
+#   repository_dispatch (event_type: deploy) - из CI/CD smart-factoring-backend после сборки образа,
+#                                              client_payload: { service, branch, image, tag, digest, sha }
+#   workflow_dispatch                        - ручной деплой/откат: окружение + тег образа
+#
+# Ветка backend -> окружение: main -> prod, всё остальное -> test.
+# Секреты и переменные - в GitHub Environments test/prod, см. README.md
+on:
+  repository_dispatch:
+    types: [ deploy ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Окружение
+        type: choice
+        options: [ test, prod ]
+        default: test
+      tag:
+        description: Тег образа backend (short sha, test, main)
+        required: true
+        default: test
+
+permissions:
+  contents: read
+
+jobs:
+  target:
+    name: Resolve target
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      # значения из payload/inputs идут только через env и проверяются, в shell не подставляются напрямую
+      - name: Resolve environment and tag
+        id: resolve
+        env:
+          EVENT: ${{ github.event_name }}
+          PAYLOAD_BRANCH: ${{ github.event.client_payload.branch }}
+          PAYLOAD_TAG: ${{ github.event.client_payload.tag }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$EVENT" = "repository_dispatch" ]; then
+            if [ "$PAYLOAD_BRANCH" = "main" ]; then environment=prod; else environment=test; fi
+            tag="$PAYLOAD_TAG"
+          else
+            environment="$INPUT_ENVIRONMENT"
+            tag="$INPUT_TAG"
+          fi
+          if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::Некорректный тег образа: '$tag'"
+            exit 1
+          fi
+          echo "environment=$environment" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Deploy smart-factoring-backend:$tag -> $environment" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to ${{ needs.target.outputs.environment }}
+    needs: target
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ needs.target.outputs.environment }}
+    # деплои в одно окружение идут строго по очереди, начатый не прерывается
+    concurrency:
+      group: deploy-${{ needs.target.outputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      # GITHUB_TOKEN этого репозитория используется на VDS для docker login в ghcr.io на время pull
+      packages: read
+
+    env:
+      ENVIRONMENT: ${{ needs.target.outputs.environment }}
+      BACKEND_TAG: ${{ needs.target.outputs.tag }}
+      VDS_HOST: ${{ secrets.VDS_HOST }}
+      VDS_USER: ${{ secrets.VDS_USER }}
+      VDS_DIR: ${{ vars.VDS_DIR }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check configuration
+        env:
+          VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
+          VDS_KNOWN_HOSTS: ${{ secrets.VDS_KNOWN_HOSTS }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          missing=""
+          for name in VDS_HOST VDS_USER VDS_SSH_KEY VDS_KNOWN_HOSTS POSTGRES_PASSWORD VDS_DIR; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::В окружении $ENVIRONMENT не заданы:$missing"
+            exit 1
+          fi
+
+      - name: Setup SSH
+        env:
+          VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
+          VDS_KNOWN_HOSTS: ${{ secrets.VDS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VDS_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$VDS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host vds
+            HostName $VDS_HOST
+            User $VDS_USER
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+
+      - name: Render .env
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+          BACKEND_MEM_LIMIT: ${{ vars.BACKEND_MEM_LIMIT }}
+          POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
+        run: |
+          umask 077
+          {
+            echo "COMPOSE_PROJECT_NAME=smart-factoring-${ENVIRONMENT}"
+            echo "BACKEND_TAG=${BACKEND_TAG}"
+            echo "BACKEND_PORT=${BACKEND_PORT:-8080}"
+            echo "BACKEND_MEM_LIMIT=${BACKEND_MEM_LIMIT:-1g}"
+            echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}"
+            echo "POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'"
+          } > deploy.env
+
+      - name: Upload files
+        run: |
+          ssh vds "mkdir -p '$VDS_DIR'"
+          scp docker-compose.yml vds:"$VDS_DIR/docker-compose.yml"
+          scp deploy.env vds:"$VDS_DIR/.env"
+          ssh vds "chmod 600 '$VDS_DIR/.env'"
+
+      - name: Pull and start
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # токен живёт только пока идёт job, после pull сразу logout
+          printf '%s' "$GHCR_TOKEN" | ssh vds "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+          ssh vds "cd '$VDS_DIR' && docker compose pull; rc=\$?; docker logout ghcr.io; exit \$rc"
+          ssh vds "cd '$VDS_DIR' && docker compose up -d --remove-orphans --wait --wait-timeout 180"
+
+      - name: Status
+        if: always()
+        run: |
+          ssh vds "cd '$VDS_DIR' && docker compose ps" || true
+          ssh vds "cd '$VDS_DIR' && docker compose logs --tail 100 backend" || true
+
+      - name: Cleanup old images
+        if: success()
+        run: ssh vds "docker image prune -f --filter 'until=168h'"
