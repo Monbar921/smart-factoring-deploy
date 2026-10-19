@@ -34,7 +34,7 @@ services:
         condition: service_healthy
     environment:
       # DataSource собирается из spring.datasource.hikari.* (DatasourceConfiguration в backend)
-      SPRING_DATASOURCE_HIKARI_JDBCURL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-smart_factoring}
+      SPRING_DATASOURCE_HIKARI_JDBCURL: jdbc:postgresql://${POSTGRES_JDBC}
       SPRING_DATASOURCE_HIKARI_USERNAME: ${POSTGRES_USER:-smart_factoring}
       SPRING_DATASOURCE_HIKARI_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
