@@ -235,6 +235,23 @@ jobs:
           POSTGRES_CPUS: ${{ vars.POSTGRES_CPUS }}
           POSTGRES_MEM_LIMIT: ${{ vars.POSTGRES_MEM_LIMIT }}
         run: |
+          # ошибки в переменных окружения ловим здесь, а не на VDS: число без единицы в mem_limit - это байты
+          invalid=""
+          check() { [ -z "${!1}" ] || [[ "${!1}" =~ $2 ]] || invalid="$invalid $1='${!1}' ($3);"; }
+          for name in BACKEND_MEM_LIMIT GATEWAY_MEM_LIMIT POSTGRES_MEM_LIMIT; do
+            check "$name" '^[0-9]+[kKmMgG]$' "нужна единица: 512m, 1g"
+          done
+          for name in BACKEND_CPUS GATEWAY_CPUS POSTGRES_CPUS; do
+            check "$name" '^[0-9]+(\.[0-9]+)?$' "число ядер: 1, 0.5"
+          done
+          for name in BACKEND_PORT GATEWAY_PORT POSTGRES_PORT; do
+            check "$name" '^[0-9]{1,5}$' "номер порта"
+          done
+          if [ -n "$invalid" ]; then
+            echo "::error::Некорректные переменные окружения $ENVIRONMENT:$invalid"
+            exit 1
+          fi
+
           umask 077
           {
             echo "COMPOSE_PROJECT_NAME=smart-factoring-${ENVIRONMENT}"
