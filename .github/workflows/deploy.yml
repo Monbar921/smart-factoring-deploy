@@ -146,6 +146,25 @@ jobs:
             echo "::error::В VDS_KNOWN_HOSTS нет ключа для адреса из VDS_HOST. Нужна строка из 'ssh-keyscan -t ed25519 <VDS_HOST>' целиком."
             echo "Ключи в VDS_KNOWN_HOSTS (адреса скрыты GitHub, отпечатки публичные):"
             ssh-keygen -lf ~/.ssh/known_hosts || echo "  не удалось разобрать ни одной строки"
+            # само содержимое не печатаем, только что за строки лежат в секрете
+            echo "Строки VDS_KNOWN_HOSTS:"
+            n=0
+            printf '%s\n' "$VDS_KNOWN_HOSTS" | tr -d '\r' | while read -r first second _; do
+              n=$((n + 1))
+              case "$first" in
+                '') kind="пустая" ;;
+                '#'*) kind="комментарий (пропущена)" ;;
+                ssh-*|ecdsa-*|sk-*) kind="ключ без адреса, тип $first" ;;
+                SHA256:*|MD5:*|256|384|521|3072|4096) kind="отпечаток, а не ключ" ;;
+                -----BEGIN*) kind="приватный ключ - его место в VDS_SSH_KEY, а не здесь" ;;
+                *)
+                  case "$second" in
+                    ssh-*|ecdsa-*|sk-*) kind="адрес + ключ типа $second, но адрес не совпал с VDS_HOST" ;;
+                    *) kind="не ключ (например, сообщение об ошибке ssh-keyscan)" ;;
+                  esac ;;
+              esac
+              echo "  $n: $kind"
+            done
             exit 1
           fi
 
@@ -179,6 +198,27 @@ jobs:
             echo "${service}=${tag}" >> "$GITHUB_OUTPUT"
             echo "- smart-factoring-${service}: \`${tag}\`" >> "$GITHUB_STEP_SUMMARY"
           done
+
+      # до любых изменений на VDS: иначе .env с несуществующим тегом остаётся на стенде,
+      # и следующий деплой другого сервиса возьмёт этот тег оттуда
+      - name: Check images exist
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BACKEND_TAG: ${{ steps.tags.outputs.backend }}
+          GATEWAY_TAG: ${{ steps.tags.outputs.gateway }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin > /dev/null
+          missing=0
+          for image in "smart-factoring-backend:$BACKEND_TAG" "smart-factoring-gateway:$GATEWAY_TAG"; do
+            if docker manifest inspect "ghcr.io/monbar921/$image" > /dev/null 2>&1; then
+              echo "ok: $image"
+            else
+              echo "::error::Образ ghcr.io/monbar921/$image не найден или нет доступа (Manage Actions access пакета)"
+              missing=1
+            fi
+          done
+          docker logout ghcr.io > /dev/null
+          exit $missing
 
       - name: Render .env
         env:
