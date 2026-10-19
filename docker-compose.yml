@@ -33,10 +33,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # DataSource собирается из spring.datasource.hikari.* (DatasourceConfiguration в backend)
-      SPRING_DATASOURCE_HIKARI_JDBCURL: jdbc:postgresql://${POSTGRES_JDBC}
-      SPRING_DATASOURCE_HIKARI_USERNAME: ${POSTGRES_USER:-smart_factoring}
-      SPRING_DATASOURCE_HIKARI_PASSWORD: ${POSTGRES_PASSWORD}
+      # подставляются в ${...} в application.yml backend
+      POSTGRES_JDBC: postgres:5432/${POSTGRES_DB:-smart_factoring}
+      POSTGRES_USER: ${POSTGRES_USER:-smart_factoring}?socketTimeout=60
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA}
+      POSTGRES_POOL: ${POSTGRES_POOL}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     # куча JVM - 75% от mem_limit (MaxRAMPercentage), число потоков GC/пулов JVM считает от cpus
