@@ -127,11 +127,32 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$VDS_SSH_KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          printf '%s\n' "$VDS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+          # пробелы и переводы строк по краям секретов при вставке в GitHub - частая причина ошибок
+          host="$(printf '%s' "$VDS_HOST" | tr -d '[:space:]')"
+          user="$(printf '%s' "$VDS_USER" | tr -d '[:space:]')"
+
+          # VDS_KNOWN_HOSTS - вывод ssh-keyscan ("<host> ssh-ed25519 AAAA...").
+          # Строке без адреса ("ssh-ed25519 AAAA...") подставляется VDS_HOST, комментарии пропускаются
+          printf '%s\n' "$VDS_KNOWN_HOSTS" | tr -d '\r' | while read -r line; do
+            case "$line" in
+              ''|'#'*) ;;
+              ssh-*|ecdsa-*|sk-*) printf '%s %s\n' "$host" "$line" ;;
+              *) printf '%s\n' "$line" ;;
+            esac
+          done > ~/.ssh/known_hosts
+
+          if ! ssh-keygen -F "$host" -f ~/.ssh/known_hosts > /dev/null; then
+            echo "::error::В VDS_KNOWN_HOSTS нет ключа для адреса из VDS_HOST. Нужна строка из 'ssh-keyscan -t ed25519 <VDS_HOST>' целиком."
+            echo "Ключи в VDS_KNOWN_HOSTS (адреса скрыты GitHub, отпечатки публичные):"
+            ssh-keygen -lf ~/.ssh/known_hosts || echo "  не удалось разобрать ни одной строки"
+            exit 1
+          fi
+
           cat > ~/.ssh/config <<EOF
           Host vds
-            HostName $VDS_HOST
-            User $VDS_USER
+            HostName $host
+            User $user
             IdentityFile ~/.ssh/id_deploy
             IdentitiesOnly yes
             StrictHostKeyChecking yes
