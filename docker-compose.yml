@@ -1,5 +1,8 @@
-# Стенд smart-factoring: postgres + backend.
+# Стенд smart-factoring: postgres + backend + gateway.
 # Переменные берутся из .env рядом с файлом: на VDS его пишет deploy workflow, локально - копия .env.example
+#
+# Снаружи доступен только gateway, backend и postgres слушают 127.0.0.1 VDS (для ssh-туннеля):
+#   клиент -> gateway :GATEWAY_PORT -> backend:8080 -> postgres:5432
 name: ${COMPOSE_PROJECT_NAME:-smart-factoring}
 
 services:
@@ -12,7 +15,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    # наружу не публикуется: только на localhost VDS, для доступа через ssh-туннель
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     # лимиты, чтобы стенды на одном VDS не отбирали ресурсы друг у друга
@@ -33,19 +35,42 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # подставляются в ${...} в application.yml backend
-      POSTGRES_JDBC: postgres:5432/${POSTGRES_DB:-smart_factoring}
-      POSTGRES_USER: ${POSTGRES_USER:-smart_factoring}?socketTimeout=60
+      # подставляются в ${...} в application.yml backend.
+      # ':-' в compose подставляет значение и для пустой переменной: пустая строка в Spring перекрыла бы его default
+      POSTGRES_JDBC: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-smart_factoring}?socketTimeout=60
+      POSTGRES_USER: ${POSTGRES_USER:-smart_factoring}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA}
-      POSTGRES_POOL: ${POSTGRES_POOL}
+      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-public}
+      POSTGRES_POOL: ${POSTGRES_POOL:-smart_factoring_backend}
     ports:
-      - "${BACKEND_PORT:-8080}:8080"
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     # куча JVM - 75% от mem_limit (MaxRAMPercentage), число потоков GC/пулов JVM считает от cpus
     cpus: ${BACKEND_CPUS:-1}
     mem_limit: ${BACKEND_MEM_LIMIT:-1g}
     healthcheck:
       test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP" ]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 6
+
+  gateway:
+    image: ghcr.io/monbar921/smart-factoring-gateway:${GATEWAY_TAG:?GATEWAY_TAG is required}
+    restart: unless-stopped
+    command: [ "java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar" ]
+    # backend нужен gateway только при проксировании, не при старте: пока backend поднимается, gateway отвечает 5xx
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      # подставляется в ${...} в application.yml gateway
+      BACKEND_URI: http://backend:8080
+    ports:
+      - "${GATEWAY_PORT:-8090}:8090"
+    cpus: ${GATEWAY_CPUS:-0.5}
+    mem_limit: ${GATEWAY_MEM_LIMIT:-512m}
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8090/actuator/health | grep -q UP" ]
       interval: 10s
       timeout: 5s
       start_period: 60s

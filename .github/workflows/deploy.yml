@@ -1,11 +1,14 @@
 name: Deploy
 
 # Раскатка docker-compose.yml на VDS.
-#   repository_dispatch (event_type: deploy) - из CI/CD smart-factoring-backend после сборки образа,
+#   repository_dispatch (event_type: deploy) - из CI/CD smart-factoring-backend / smart-factoring-gateway
+#                                              после сборки образа,
 #                                              client_payload: { service, branch, image, tag, digest, sha }
-#   workflow_dispatch                        - ручной деплой/откат: окружение + тег образа
+#   workflow_dispatch                        - ручной деплой/откат: окружение + сервис + тег образа
 #
-# Ветка backend -> окружение: main -> prod, всё остальное -> test.
+# Ветка сервиса -> окружение: main -> prod, всё остальное -> test.
+# Обновляется тег только пришедшего сервиса, тег второго берётся из текущего .env на VDS
+# (если стенд ещё пустой - тег ветки окружения: test или main).
 # Секреты и переменные - в GitHub Environments test/prod, см. README.md
 on:
   repository_dispatch:
@@ -17,8 +20,13 @@ on:
         type: choice
         options: [ test, prod ]
         default: test
+      service:
+        description: Сервис
+        type: choice
+        options: [ backend, gateway ]
+        default: backend
       tag:
-        description: Тег образа backend (short sha, test, main)
+        description: Тег образа (short sha, test, main)
         required: true
         default: test
 
@@ -31,40 +39,51 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.resolve.outputs.environment }}
+      service: ${{ steps.resolve.outputs.service }}
       tag: ${{ steps.resolve.outputs.tag }}
     steps:
       # значения из payload/inputs идут только через env и проверяются, в shell не подставляются напрямую
-      - name: Resolve environment and tag
+      - name: Resolve environment, service and tag
         id: resolve
         env:
           EVENT: ${{ github.event_name }}
+          PAYLOAD_SERVICE: ${{ github.event.client_payload.service }}
           PAYLOAD_BRANCH: ${{ github.event.client_payload.branch }}
           PAYLOAD_TAG: ${{ github.event.client_payload.tag }}
           INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          INPUT_SERVICE: ${{ inputs.service }}
           INPUT_TAG: ${{ inputs.tag }}
         run: |
           if [ "$EVENT" = "repository_dispatch" ]; then
             if [ "$PAYLOAD_BRANCH" = "main" ]; then environment=prod; else environment=test; fi
+            service="${PAYLOAD_SERVICE#smart-factoring-}"
             tag="$PAYLOAD_TAG"
           else
             environment="$INPUT_ENVIRONMENT"
+            service="$INPUT_SERVICE"
             tag="$INPUT_TAG"
           fi
+          case "$service" in
+            backend|gateway) ;;
+            *) echo "::error::Неизвестный сервис: '$service'"; exit 1 ;;
+          esac
           if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
             echo "::error::Некорректный тег образа: '$tag'"
             exit 1
           fi
           echo "environment=$environment" >> "$GITHUB_OUTPUT"
+          echo "service=$service" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Deploy smart-factoring-backend:$tag -> $environment" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploy smart-factoring-$service:$tag -> $environment" >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
-    name: Deploy to ${{ needs.target.outputs.environment }}
+    name: Deploy ${{ needs.target.outputs.service }} to ${{ needs.target.outputs.environment }}
     needs: target
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: ${{ needs.target.outputs.environment }}
-    # деплои в одно окружение идут строго по очереди, начатый не прерывается
+    # деплои в одно окружение идут строго по очереди, начатый не прерывается:
+    # иначе два сервиса одновременно перезаписали бы .env друг друга
     concurrency:
       group: deploy-${{ needs.target.outputs.environment }}
       cancel-in-progress: false
@@ -75,7 +94,8 @@ jobs:
 
     env:
       ENVIRONMENT: ${{ needs.target.outputs.environment }}
-      BACKEND_TAG: ${{ needs.target.outputs.tag }}
+      SERVICE: ${{ needs.target.outputs.service }}
+      SERVICE_TAG: ${{ needs.target.outputs.tag }}
       VDS_HOST: ${{ secrets.VDS_HOST }}
       VDS_USER: ${{ secrets.VDS_USER }}
       VDS_DIR: ${{ vars.VDS_DIR }}
@@ -117,12 +137,39 @@ jobs:
             StrictHostKeyChecking yes
           EOF
 
+      # тег пришедшего сервиса - из dispatch, остальных - как сейчас на стенде
+      - name: Resolve image tags
+        id: tags
+        run: |
+          current="$(ssh vds "cat '$VDS_DIR/.env' 2>/dev/null" || true)"
+          if [ "$ENVIRONMENT" = "prod" ]; then branch_tag=main; else branch_tag=test; fi
+          for service in backend gateway; do
+            key="${service^^}_TAG"
+            if [ "$service" = "$SERVICE" ]; then
+              tag="$SERVICE_TAG"
+            else
+              tag="$(printf '%s\n' "$current" | sed -n "s/^${key}=//p" | tail -n 1)"
+              tag="${tag:-$branch_tag}"
+            fi
+            if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "::error::Некорректный $key на стенде: '$tag'"
+              exit 1
+            fi
+            echo "${service}=${tag}" >> "$GITHUB_OUTPUT"
+            echo "- smart-factoring-${service}: \`${tag}\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
       - name: Render .env
         env:
+          BACKEND_TAG: ${{ steps.tags.outputs.backend }}
+          GATEWAY_TAG: ${{ steps.tags.outputs.gateway }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT }}
           BACKEND_CPUS: ${{ vars.BACKEND_CPUS }}
           BACKEND_MEM_LIMIT: ${{ vars.BACKEND_MEM_LIMIT }}
+          GATEWAY_PORT: ${{ vars.GATEWAY_PORT }}
+          GATEWAY_CPUS: ${{ vars.GATEWAY_CPUS }}
+          GATEWAY_MEM_LIMIT: ${{ vars.GATEWAY_MEM_LIMIT }}
           POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
           POSTGRES_CPUS: ${{ vars.POSTGRES_CPUS }}
           POSTGRES_MEM_LIMIT: ${{ vars.POSTGRES_MEM_LIMIT }}
@@ -134,6 +181,10 @@ jobs:
             echo "BACKEND_PORT=${BACKEND_PORT:-8080}"
             echo "BACKEND_CPUS=${BACKEND_CPUS:-1}"
             echo "BACKEND_MEM_LIMIT=${BACKEND_MEM_LIMIT:-1g}"
+            echo "GATEWAY_TAG=${GATEWAY_TAG}"
+            echo "GATEWAY_PORT=${GATEWAY_PORT:-8090}"
+            echo "GATEWAY_CPUS=${GATEWAY_CPUS:-0.5}"
+            echo "GATEWAY_MEM_LIMIT=${GATEWAY_MEM_LIMIT:-512m}"
             echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}"
             echo "POSTGRES_CPUS=${POSTGRES_CPUS:-1}"
             echo "POSTGRES_MEM_LIMIT=${POSTGRES_MEM_LIMIT:-512m}"
@@ -160,7 +211,7 @@ jobs:
         if: always()
         run: |
           ssh vds "cd '$VDS_DIR' && docker compose ps" || true
-          ssh vds "cd '$VDS_DIR' && docker compose logs --tail 100 backend" || true
+          ssh vds "cd '$VDS_DIR' && docker compose logs --tail 100 '$SERVICE'" || true
 
       - name: Cleanup old images
         if: success()
