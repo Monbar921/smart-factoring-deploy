@@ -11,8 +11,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: public
-      POSTGRES_USER: ${POSTGRES_USER_OWNER:-smart_factoring}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_ADMIN:?POSTGRES_PASSWORD is required}
+      POSTGRES_USER: ${POSTGRES_USER_ADMIN:?POSTGRES_USER_ADMIN is require}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_ADMIN:?POSTGRES_PASSWORD_ADMIN is required}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
