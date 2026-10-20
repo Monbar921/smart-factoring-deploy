@@ -1,0 +1,10 @@
+# Настройки редактора для IntelliJ IDEA / VS Code (поддерживается из коробки)
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.{bat,cmd}]
+end_of_line = crlf
