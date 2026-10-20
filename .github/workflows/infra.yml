@@ -1,0 +1,107 @@
+name: Infra
+
+# Раскатка общей инфраструктуры VDS (infra/docker-compose.yml: postgres на все стенды).
+#   push в main с изменениями infra/** - автоматически
+#   workflow_dispatch                  - вручную
+#
+# Секреты и переменные - уровня репозитория (не окружений): инфраструктура одна на test и prod, см. README.md
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+      - ".github/actions/vds-ssh/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# перезапуск postgres посреди другого перезапуска postgres ни к чему
+concurrency:
+  group: deploy-infra
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy infra
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      VDS_INFRA_DIR: ${{ vars.VDS_INFRA_DIR }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check configuration
+        env:
+          VDS_HOST: ${{ secrets.VDS_HOST }}
+          VDS_USER: ${{ secrets.VDS_USER }}
+          VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
+          VDS_KNOWN_HOSTS: ${{ secrets.VDS_KNOWN_HOSTS }}
+          POSTGRES_USER_ADMIN: ${{ vars.POSTGRES_USER_ADMIN }}
+          POSTGRES_PASSWORD_ADMIN: ${{ secrets.POSTGRES_PASSWORD_ADMIN }}
+        run: |
+          missing=""
+          for name in VDS_HOST VDS_USER VDS_SSH_KEY VDS_KNOWN_HOSTS VDS_INFRA_DIR POSTGRES_USER_ADMIN POSTGRES_PASSWORD_ADMIN; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::В Settings → Secrets and variables → Actions (уровень репозитория) не заданы:$missing"
+            exit 1
+          fi
+
+      - name: Setup SSH
+        uses: ./.github/actions/vds-ssh
+        with:
+          host: ${{ secrets.VDS_HOST }}
+          user: ${{ secrets.VDS_USER }}
+          ssh-key: ${{ secrets.VDS_SSH_KEY }}
+          known-hosts: ${{ secrets.VDS_KNOWN_HOSTS }}
+
+      - name: Render .env
+        env:
+          POSTGRES_USER_ADMIN: ${{ vars.POSTGRES_USER_ADMIN }}
+          POSTGRES_PASSWORD_ADMIN: ${{ secrets.POSTGRES_PASSWORD_ADMIN }}
+          POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
+          POSTGRES_CPUS: ${{ vars.POSTGRES_CPUS }}
+          POSTGRES_MEM_LIMIT: ${{ vars.POSTGRES_MEM_LIMIT }}
+        run: |
+          invalid=""
+          check() { [ -z "${!1}" ] || [[ "${!1}" =~ $2 ]] || invalid="$invalid $1='${!1}' ($3);"; }
+          check POSTGRES_MEM_LIMIT '^[0-9]+[kKmMgG]$' "нужна единица: 512m, 1g"
+          check POSTGRES_CPUS '^[0-9]+(\.[0-9]+)?$' "число ядер: 1, 0.5"
+          check POSTGRES_PORT '^([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$' "порт 1-65535"
+          if [ -n "$invalid" ]; then
+            echo "::error::Некорректные переменные:$invalid"
+            exit 1
+          fi
+
+          umask 077
+          {
+            echo "POSTGRES_USER_ADMIN='${POSTGRES_USER_ADMIN}'"
+            echo "POSTGRES_PASSWORD_ADMIN='${POSTGRES_PASSWORD_ADMIN}'"
+            echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}"
+            echo "POSTGRES_CPUS=${POSTGRES_CPUS:-1}"
+            echo "POSTGRES_MEM_LIMIT=${POSTGRES_MEM_LIMIT:-512m}"
+          } > infra.env
+
+      - name: Upload files
+        run: |
+          ssh vds "mkdir -p '$VDS_INFRA_DIR'"
+          scp infra/docker-compose.yml vds:"$VDS_INFRA_DIR/docker-compose.yml"
+          scp infra.env vds:"$VDS_INFRA_DIR/.env"
+          ssh vds "chmod 600 '$VDS_INFRA_DIR/.env'"
+
+      # postgres пересоздаётся, только если изменились его настройки; данные в volume сохраняются
+      - name: Pull and start
+        run: |
+          ssh vds "cd '$VDS_INFRA_DIR' && docker compose pull && docker compose up -d --remove-orphans --wait --wait-timeout 120"
+
+      - name: Status
+        if: always()
+        run: |
+          ssh vds "cd '$VDS_INFRA_DIR' && docker compose ps" || true
+          ssh vds "cd '$VDS_INFRA_DIR' && docker compose logs --tail 50 postgres" || true

@@ -1,0 +1,37 @@
+# Общая инфраструктура VDS: один postgres на все стенды (test, prod).
+# Раскатывается отдельно от стендов - workflow infra.yml; .env рядом с файлом пишет он же.
+#
+# Стенды подключаются к postgres через сеть smart-factoring-db (в их docker-compose.yml она external),
+# у каждого стенда в этом postgres своя база и свой пользователь, см. README.md
+name: smart-factoring-infra
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      # создаются только при первом запуске пустого volume
+      POSTGRES_DB: public
+      POSTGRES_USER: ${POSTGRES_USER_ADMIN:?POSTGRES_USER_ADMIN is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_ADMIN:?POSTGRES_PASSWORD_ADMIN is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # для IDE через ssh-туннель, наружу не публикуется
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    cpus: ${POSTGRES_CPUS:-1}
+    mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+networks:
+  # фиксированное имя без префикса проекта: по нему сеть находят стенды
+  default:
+    name: smart-factoring-db
+
+volumes:
+  postgres-data:
+    name: smart-factoring-postgres-data

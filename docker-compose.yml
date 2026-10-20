@@ -1,54 +1,39 @@
-# Стенд smart-factoring: postgres + backend + gateway.
+# Стенд smart-factoring (test или prod): backend + gateway.
 # Переменные берутся из .env рядом с файлом: на VDS его пишет deploy workflow, локально - копия .env.example
 #
-# Снаружи доступен только gateway, backend и postgres слушают 127.0.0.1 VDS (для ssh-туннеля):
-#   клиент -> gateway :GATEWAY_PORT -> backend:8080 -> postgres:5432
+# Postgres общий для всех стендов и раскатывается отдельно (infra/docker-compose.yml, workflow infra.yml):
+# backend ходит в него через сеть smart-factoring-db, у стенда в нём своя база и свой пользователь.
+#
+# Снаружи доступен только gateway; backend - только внутри сети стенда:
+#   клиент -> gateway :GATEWAY_PORT -> backend:BACKEND_PORT -> postgres:5432 (сеть smart-factoring-db)
+# Порты приложений задаются через SERVER_PORT: Spring Boot берёт его вместо server.port из application.yml
 name: ${COMPOSE_PROJECT_NAME:-smart-factoring}
 
 services:
-  postgres:
-    image: postgres:17.6-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: public
-      POSTGRES_USER: ${POSTGRES_USER_ADMIN:?POSTGRES_USER_ADMIN is require}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_ADMIN:?POSTGRES_PASSWORD_ADMIN is required}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
-    # лимиты, чтобы стенды на одном VDS не отбирали ресурсы друг у друга
-    cpus: ${POSTGRES_CPUS:-1}
-    mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   backend:
     image: ghcr.io/monbar921/smart-factoring-backend:${BACKEND_TAG:?BACKEND_TAG is required}
     restart: unless-stopped
     # в образе нет ENTRYPOINT, команда запуска задаётся здесь
     command: [ "java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar" ]
-    depends_on:
-      postgres:
-        condition: service_healthy
+    # postgres в другом compose-проекте, depends_on на него невозможен:
+    # если он недоступен, backend падает на старте и перезапускается (restart: unless-stopped)
+    networks:
+      - default
+      - db
     environment:
       # подставляются в ${...} в application.yml backend.
       # ':-' в compose подставляет значение и для пустой переменной: пустая строка в Spring перекрыла бы его default
-      POSTGRES_JDBC: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-smart_factoring}?socketTimeout=60
-      POSTGRES_USER: ${POSTGRES_USER:-smart_factoring}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-public}
+      POSTGRES_JDBC: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?socketTimeout=60
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:?POSTGRES_SCHEMA is required}
       POSTGRES_POOL: ${POSTGRES_POOL:-smart_factoring_backend}
-    ports:
-      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+      SERVER_PORT: ${BACKEND_PORT:-8080}
     # куча JVM - 75% от mem_limit (MaxRAMPercentage), число потоков GC/пулов JVM считает от cpus
     cpus: ${BACKEND_CPUS:-1}
     mem_limit: ${BACKEND_MEM_LIMIT:-1g}
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP" ]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:$${SERVER_PORT}/actuator/health | grep -q UP" ]
       interval: 10s
       timeout: 5s
       start_period: 60s
@@ -64,17 +49,22 @@ services:
         condition: service_started
     environment:
       # подставляется в ${...} в application.yml gateway
-      BACKEND_URI: http://backend:8080
+      BACKEND_URI: http://backend:${BACKEND_PORT:-8080}
+      SERVER_PORT: ${GATEWAY_PORT:-8090}
+    # gateway слушает тот же порт, что и публикуется на VDS
     ports:
-      - "${GATEWAY_PORT:-8090}:8090"
+      - "${GATEWAY_PORT:-8090}:${GATEWAY_PORT:-8090}"
     cpus: ${GATEWAY_CPUS:-0.5}
     mem_limit: ${GATEWAY_MEM_LIMIT:-512m}
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://localhost:8090/actuator/health | grep -q UP" ]
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:$${SERVER_PORT}/actuator/health | grep -q UP" ]
       interval: 10s
       timeout: 5s
       start_period: 60s
       retries: 6
 
-volumes:
-  postgres-data:
+networks:
+  # создаётся infra/docker-compose.yml: сначала раскатить infra, потом стенды
+  db:
+    external: true
+    name: smart-factoring-db

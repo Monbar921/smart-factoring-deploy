@@ -9,6 +9,7 @@ name: Deploy
 # Ветка сервиса -> окружение: main -> prod, всё остальное -> test.
 # Обновляется тег только пришедшего сервиса, тег второго берётся из текущего .env на VDS
 # (если стенд ещё пустой - тег ветки окружения: test или main).
+# Postgres общий для стендов и раскатывается отдельно (workflow infra.yml) - здесь только база/пользователь стенда.
 # Секреты и переменные - в GitHub Environments test/prod, см. README.md
 on:
   repository_dispatch:
@@ -108,10 +109,13 @@ jobs:
         env:
           VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
           VDS_KNOWN_HOSTS: ${{ secrets.VDS_KNOWN_HOSTS }}
+          POSTGRES_USER: ${{ vars.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_SCHEMA: ${{ vars.POSTGRES_SCHEMA }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
         run: |
           missing=""
-          for name in VDS_HOST VDS_USER VDS_SSH_KEY VDS_KNOWN_HOSTS POSTGRES_PASSWORD VDS_DIR; do
+          for name in VDS_HOST VDS_USER VDS_SSH_KEY VDS_KNOWN_HOSTS VDS_DIR POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD POSTGRES_SCHEMA; do
             [ -n "${!name}" ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
@@ -120,62 +124,12 @@ jobs:
           fi
 
       - name: Setup SSH
-        env:
-          VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
-          VDS_KNOWN_HOSTS: ${{ secrets.VDS_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$VDS_SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-
-          # пробелы и переводы строк по краям секретов при вставке в GitHub - частая причина ошибок
-          host="$(printf '%s' "$VDS_HOST" | tr -d '[:space:]')"
-          user="$(printf '%s' "$VDS_USER" | tr -d '[:space:]')"
-
-          # VDS_KNOWN_HOSTS - вывод ssh-keyscan ("<host> ssh-ed25519 AAAA...").
-          # Строке без адреса ("ssh-ed25519 AAAA...") подставляется VDS_HOST, комментарии пропускаются
-          printf '%s\n' "$VDS_KNOWN_HOSTS" | tr -d '\r' | while read -r line; do
-            case "$line" in
-              ''|'#'*) ;;
-              ssh-*|ecdsa-*|sk-*) printf '%s %s\n' "$host" "$line" ;;
-              *) printf '%s\n' "$line" ;;
-            esac
-          done > ~/.ssh/known_hosts
-
-          if ! ssh-keygen -F "$host" -f ~/.ssh/known_hosts > /dev/null; then
-            echo "::error::В VDS_KNOWN_HOSTS нет ключа для адреса из VDS_HOST. Нужна строка из 'ssh-keyscan -t ed25519 <VDS_HOST>' целиком."
-            echo "Ключи в VDS_KNOWN_HOSTS (адреса скрыты GitHub, отпечатки публичные):"
-            ssh-keygen -lf ~/.ssh/known_hosts || echo "  не удалось разобрать ни одной строки"
-            # само содержимое не печатаем, только что за строки лежат в секрете
-            echo "Строки VDS_KNOWN_HOSTS:"
-            n=0
-            printf '%s\n' "$VDS_KNOWN_HOSTS" | tr -d '\r' | while read -r first second _; do
-              n=$((n + 1))
-              case "$first" in
-                '') kind="пустая" ;;
-                '#'*) kind="комментарий (пропущена)" ;;
-                ssh-*|ecdsa-*|sk-*) kind="ключ без адреса, тип $first" ;;
-                SHA256:*|MD5:*|256|384|521|3072|4096) kind="отпечаток, а не ключ" ;;
-                -----BEGIN*) kind="приватный ключ - его место в VDS_SSH_KEY, а не здесь" ;;
-                *)
-                  case "$second" in
-                    ssh-*|ecdsa-*|sk-*) kind="адрес + ключ типа $second, но адрес не совпал с VDS_HOST" ;;
-                    *) kind="не ключ (например, сообщение об ошибке ssh-keyscan)" ;;
-                  esac ;;
-              esac
-              echo "  $n: $kind"
-            done
-            exit 1
-          fi
-
-          cat > ~/.ssh/config <<EOF
-          Host vds
-            HostName $host
-            User $user
-            IdentityFile ~/.ssh/id_deploy
-            IdentitiesOnly yes
-            StrictHostKeyChecking yes
-          EOF
+        uses: ./.github/actions/vds-ssh
+        with:
+          host: ${{ secrets.VDS_HOST }}
+          user: ${{ secrets.VDS_USER }}
+          ssh-key: ${{ secrets.VDS_SSH_KEY }}
+          known-hosts: ${{ secrets.VDS_KNOWN_HOSTS }}
 
       # тег пришедшего сервиса - из dispatch, остальных - как сейчас на стенде
       - name: Resolve image tags
@@ -220,32 +174,39 @@ jobs:
           docker logout ghcr.io > /dev/null
           exit $missing
 
+      - name: Check infra is deployed
+        run: |
+          if ! ssh vds "docker network inspect smart-factoring-db > /dev/null 2>&1"; then
+            echo "::error::На VDS нет сети smart-factoring-db: сначала раскатите общий postgres (Actions → Infra → Run workflow)"
+            exit 1
+          fi
+
       - name: Render .env
         env:
           BACKEND_TAG: ${{ steps.tags.outputs.backend }}
           GATEWAY_TAG: ${{ steps.tags.outputs.gateway }}
+          POSTGRES_USER: ${{ vars.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_SCHEMA: ${{ vars.POSTGRES_SCHEMA }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT }}
           BACKEND_CPUS: ${{ vars.BACKEND_CPUS }}
           BACKEND_MEM_LIMIT: ${{ vars.BACKEND_MEM_LIMIT }}
           GATEWAY_PORT: ${{ vars.GATEWAY_PORT }}
           GATEWAY_CPUS: ${{ vars.GATEWAY_CPUS }}
           GATEWAY_MEM_LIMIT: ${{ vars.GATEWAY_MEM_LIMIT }}
-          POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
-          POSTGRES_CPUS: ${{ vars.POSTGRES_CPUS }}
-          POSTGRES_MEM_LIMIT: ${{ vars.POSTGRES_MEM_LIMIT }}
         run: |
           # ошибки в переменных окружения ловим здесь, а не на VDS: число без единицы в mem_limit - это байты
           invalid=""
           check() { [ -z "${!1}" ] || [[ "${!1}" =~ $2 ]] || invalid="$invalid $1='${!1}' ($3);"; }
-          for name in BACKEND_MEM_LIMIT GATEWAY_MEM_LIMIT POSTGRES_MEM_LIMIT; do
+          for name in BACKEND_MEM_LIMIT GATEWAY_MEM_LIMIT; do
             check "$name" '^[0-9]+[kKmMgG]$' "нужна единица: 512m, 1g"
           done
-          for name in BACKEND_CPUS GATEWAY_CPUS POSTGRES_CPUS; do
+          for name in BACKEND_CPUS GATEWAY_CPUS; do
             check "$name" '^[0-9]+(\.[0-9]+)?$' "число ядер: 1, 0.5"
           done
-          for name in BACKEND_PORT GATEWAY_PORT POSTGRES_PORT; do
-            check "$name" '^[0-9]{1,5}$' "номер порта"
+          for name in BACKEND_PORT GATEWAY_PORT; do
+            check "$name" '^([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$' "порт 1-65535"
           done
           if [ -n "$invalid" ]; then
             echo "::error::Некорректные переменные окружения $ENVIRONMENT:$invalid"
@@ -263,10 +224,10 @@ jobs:
             echo "GATEWAY_PORT=${GATEWAY_PORT:-8090}"
             echo "GATEWAY_CPUS=${GATEWAY_CPUS:-0.5}"
             echo "GATEWAY_MEM_LIMIT=${GATEWAY_MEM_LIMIT:-512m}"
-            echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}"
-            echo "POSTGRES_CPUS=${POSTGRES_CPUS:-1}"
-            echo "POSTGRES_MEM_LIMIT=${POSTGRES_MEM_LIMIT:-512m}"
+            echo "POSTGRES_USER='${POSTGRES_USER}'"
             echo "POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'"
+            echo "POSTGRES_SCHEMA='${POSTGRES_SCHEMA}'"
+            echo "POSTGRES_DB='${POSTGRES_DB}'"
           } > deploy.env
 
       - name: Upload files
