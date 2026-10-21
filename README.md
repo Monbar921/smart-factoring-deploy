@@ -1,23 +1,28 @@
 # smart-factoring-deploy
 
-Раскатка smart-factoring на VDS через docker compose: общий `postgres` + стенды `test` и `prod` (`backend` + `gateway`).
+Раскатка smart-factoring на VDS через docker compose: общие `postgres` и `keycloak` + стенды `test` и `prod`
+(`backend` + `gateway`).
 
 ```
-                       стенд test (smart-factoring-test)              infra (smart-factoring-infra)
-клиент ──▶ :GATEWAY_PORT gateway ──▶ backend:BACKEND_PORT ──┐
-                                                            ├──▶ postgres:5432 ── 127.0.0.1:POSTGRES_PORT
-клиент ──▶ :GATEWAY_PORT gateway ──▶ backend:BACKEND_PORT ──┘    (сеть smart-factoring-db)
-                       стенд prod (smart-factoring-prod)
+                         стенд test (smart-factoring-test)                infra (smart-factoring-infra)
+клиент ─Bearer─▶ :GATEWAY_PORT gateway ──▶ backend:BACKEND_PORT ──┐
+                                 │                                 ├──▶ postgres:5432 ── 127.0.0.1:POSTGRES_PORT
+клиент ─Bearer─▶ :GATEWAY_PORT gateway ──▶ backend:BACKEND_PORT ──┘    (сеть smart-factoring-db)
+                         стенд prod│(smart-factoring-prod)                  ▲ база keycloak
+                                   └── ключи подписи ─────────────▶ keycloak:8080 ── :KEYCLOAK_PORT (логин в браузере)
+                                       (сеть smart-factoring-auth)
 ```
 
-- Postgres один на все стенды, у каждого стенда в нём своя база и свой пользователь.
-- Снаружи открыт только gateway. Backend доступен только внутри сети своего стенда и ходит в postgres через общую
-  сеть `smart-factoring-db`. Postgres - ещё и на `127.0.0.1` VDS для IDE через ssh-туннель.
+- Postgres и keycloak одни на все стенды. У каждого стенда в postgres своя база и пользователь, в keycloak - свой realm.
+- Снаружи открыты gateway и страница логина keycloak. Backend доступен только внутри сети своего стенда.
+  Postgres - ещё и на `127.0.0.1` VDS для IDE через ssh-туннель.
+- Пользователя проверяет gateway: подпись токена по ключам realm, issuer, срок действия. Без действующего токена -
+  401, до backend запрос не доходит. Backend получает тот же заголовок `Authorization` и только читает payload.
 - Порты приложений передаются им как `SERVER_PORT`.
 
 | Что | Compose | Workflow | Каталог на VDS | Настройки |
 |---|---|---|---|---|
-| общий postgres | [infra/docker-compose.yml](infra/docker-compose.yml) | [infra.yml](.github/workflows/infra.yml) | `VDS_INFRA_DIR` | репозиторий + Environment `test` |
+| общие postgres и keycloak | [infra/docker-compose.yml](infra/docker-compose.yml) | [infra.yml](.github/workflows/infra.yml) | `VDS_INFRA_DIR` | репозиторий + Environment `test` |
 | стенд | [docker-compose.yml](docker-compose.yml) | [deploy.yml](.github/workflows/deploy.yml) | `VDS_DIR` | Environment `test`/`prod` |
 
 ## Как это работает
@@ -25,8 +30,13 @@
 ### Infra
 
 Раскатывается при push в `main` с изменениями в `infra/` или вручную: Actions → Infra → Run workflow.
-Создаёт сеть `smart-factoring-db` и volume `smart-factoring-postgres-data`. Стенды без неё не стартуют: deploy
-проверяет сеть до любых изменений на VDS.
+
+1. Поднимает postgres. Создаёт сеть `smart-factoring-db` и volume `smart-factoring-postgres-data`.
+2. Создаёт в нём базу `keycloak` и её владельца `KEYCLOAK_DB_USER` ([init-db.sql](infra/keycloak/init-db.sql)),
+   если их нет, и выставляет пароль из `KEYCLOAK_DB_PASSWORD`. Повторный запуск ничего не ломает.
+3. Поднимает keycloak (сеть `smart-factoring-auth`). Первый старт - около минуты.
+
+Стенды без сетей infra не стартуют: deploy проверяет их до любых изменений на VDS.
 
 ### Стенды
 
@@ -80,6 +90,46 @@ revoke connect on database smart_factoring_test from public;
 
 Пароли в репозиторий не коммитить - он публичный.
 
+## Keycloak
+
+### Realm
+
+Realm-файлы - [infra/keycloak/realms](infra/keycloak/realms), сейчас только
+[smart-factoring-test](infra/keycloak/realms/smart-factoring-test-realm.json):
+
+- роль `user` и тестовый пользователь `KEYCLOAK_TEST_USER` с паролем `KEYCLOAK_TEST_USER_PASSWORD` и этой ролью;
+- клиент `smart-factoring-swagger`: публичный, Authorization Code + PKCE для кнопки Authorize в Swagger UI
+  (redirect - `KEYCLOAK_TEST_GATEWAY_URL/swagger-ui/oauth2-redirect.html`) и password grant для curl;
+- `sslRequired: none`: стенд по HTTP. Для prod - только с HTTPS.
+
+**Realm импортируется, только если его ещё нет.** Правки realm-файла, логина или пароля тестового пользователя
+после первого импорта не применяются: менять в админке или удалить realm в админке и перезапустить Infra.
+
+Realm для prod (`smart-factoring-prod`) пока нет: стенд prod без него не пустит ни одного запроса.
+
+### Токен
+
+В Swagger UI gateway: **Authorize** → логин в keycloak → токен подставляется во все запросы.
+
+Из консоли:
+
+```bash
+curl -s -d grant_type=password -d client_id=smart-factoring-swagger -d username=<KEYCLOAK_TEST_USER> \
+  -d password=<KEYCLOAK_TEST_USER_PASSWORD> <KEYCLOAK_PUBLIC_URL>/realms/smart-factoring-test/protocol/openid-connect/token
+curl -H "Authorization: Bearer <access_token>" http://<VDS>:<GATEWAY_PORT>/api/backend/maintenance/whoami
+```
+
+### Админка
+
+Из интернета по HTTP админка не откроется (master realm требует HTTPS для внешних адресов), только через туннель:
+
+```bash
+ssh -L 8180:127.0.0.1:<KEYCLOAK_PORT> deploy@<host>
+```
+
+Затем http://localhost:8180/admin, логин `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`. Администратор создаётся
+только при первом старте keycloak на пустой базе.
+
 ## Настройка GitHub
 
 ### Доступ к образу
@@ -122,8 +172,9 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `BACKEND_MEM_LIMIT` | `1g` | лимит памяти backend, куча JVM - 75% от него, необязательно |
 | Variable | `GATEWAY_CPUS` | `0.5` | лимит CPU gateway, необязательно |
 | Variable | `GATEWAY_MEM_LIMIT` | `512m` | лимит памяти gateway, необязательно |
+| Variable | `KEYCLOAK_REALM` | `smart-factoring-test` | realm стенда, необязательно, по умолчанию `smart-factoring-<окружение>` |
 
-Только в `test` - настройки общего postgres (workflow Infra запускается в окружении `test`):
+Только в `test` - настройки общих postgres и keycloak (workflow Infra запускается в окружении `test`):
 
 | Тип | Имя | Пример | Описание |
 |---|---|---|---|
@@ -132,8 +183,22 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `POSTGRES_PORT` | `5432` | порт postgres на 127.0.0.1 VDS, необязательно |
 | Variable | `POSTGRES_CPUS` | `1` | лимит CPU postgres, необязательно |
 | Variable | `POSTGRES_MEM_LIMIT` | `512m` | лимит памяти postgres, необязательно |
+| Variable | `KEYCLOAK_ADMIN` | `admin` | администратор keycloak (master realm) |
+| Secret | `KEYCLOAK_ADMIN_PASSWORD` | | его пароль |
+| Variable | `KEYCLOAK_DB_USER` | `keycloak` | пользователь keycloak в postgres, владелец базы `keycloak`: строчная латиница, цифры, `_`. После первой раскатки не менять |
+| Secret | `KEYCLOAK_DB_PASSWORD` | | его пароль |
+| Variable | `KEYCLOAK_TEST_USER` | `tester` | пользователь realm `smart-factoring-test`: латиница, цифры, `. _ -` |
+| Secret | `KEYCLOAK_TEST_USER_PASSWORD` | | его пароль |
+| Variable | `KEYCLOAK_PORT` | `8180` | публичный порт keycloak, необязательно, по умолчанию 8180 |
+| Variable | `KEYCLOAK_PUBLIC_URL` | `http://203.0.113.10:8180` | адрес keycloak для браузера и `iss` токенов, необязательно, по умолчанию `http://VDS_HOST:KEYCLOAK_PORT` |
+| Variable | `KEYCLOAK_TEST_GATEWAY_URL` | `http://203.0.113.10:8091` | адрес gateway test для redirect Swagger UI, необязательно, по умолчанию `http://VDS_HOST:GATEWAY_PORT` |
+| Variable | `KEYCLOAK_CPUS` | `1` | лимит CPU keycloak, необязательно |
+| Variable | `KEYCLOAK_MEM_LIMIT` | `1g` | лимит памяти keycloak, необязательно |
 
 `POSTGRES_USER_ADMIN` и `POSTGRES_PASSWORD_ADMIN` применяются только при первом запуске пустого volume.
+Пароли - без кавычек и обратной косой черты: они подставляются в `.env` и realm-файл, Infra это проверяет.
+
+`KEYCLOAK_PUBLIC_URL` (если задан) нужен и в `prod`: из него gateway стенда собирает issuer.
 
 У окружений должны различаться `VDS_DIR`, `GATEWAY_PORT` и база/пользователь. `BACKEND_PORT` может совпадать:
 у каждого стенда своя сеть.
@@ -145,6 +210,10 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 
 ```bash
 cp infra/.env.example infra/.env
+docker compose -f infra/docker-compose.yml up -d --wait postgres
+# база keycloak, как в workflow Infra
+(set -a; . infra/.env; set +a; docker compose -f infra/docker-compose.yml exec -T postgres \
+  psql -U "$POSTGRES_USER_ADMIN" -d postgres -v ON_ERROR_STOP=1 -v user="$KEYCLOAK_DB_USER" -v pw="$KEYCLOAK_DB_PASSWORD" < infra/keycloak/init-db.sql)
 docker compose -f infra/docker-compose.yml up -d --wait
 # создать базу и пользователя стенда, см. выше
 cp .env.example .env

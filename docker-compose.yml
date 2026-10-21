@@ -1,8 +1,9 @@
 # Стенд smart-factoring (test или prod): backend + gateway.
 # Переменные берутся из .env рядом с файлом: на VDS его пишет deploy workflow, локально - копия .env.example
 #
-# Postgres общий для всех стендов и раскатывается отдельно (infra/docker-compose.yml, workflow infra.yml):
-# backend ходит в него через сеть smart-factoring-db, у стенда в нём своя база и свой пользователь.
+# Postgres и keycloak общие для всех стендов и раскатываются отдельно (infra/docker-compose.yml, workflow infra.yml):
+# backend ходит в postgres через сеть smart-factoring-db, у стенда в нём своя база и свой пользователь;
+# gateway берёт ключи подписи токенов у keycloak через сеть smart-factoring-auth, у стенда в нём свой realm.
 #
 # Снаружи доступен только gateway; backend - только внутри сети стенда:
 #   клиент -> gateway :GATEWAY_PORT -> backend:BACKEND_PORT -> postgres:5432 (сеть smart-factoring-db)
@@ -51,6 +52,13 @@ services:
       # подставляется в ${...} в application.yml gateway
       BACKEND_URI: http://backend:${BACKEND_PORT:-8080}
       SERVER_PORT: ${GATEWAY_PORT:-8090}
+      # iss токенов realm стенда - публичный адрес keycloak, тот же, что видит браузер
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_PUBLIC_URL:?KEYCLOAK_PUBLIC_URL is required}/realms/${KEYCLOAK_REALM:?KEYCLOAK_REALM is required}
+      # ключи подписи - напрямую из keycloak по сети smart-factoring-auth
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs
+    networks:
+      - default
+      - auth
     # gateway слушает тот же порт, что и публикуется на VDS
     ports:
       - "${GATEWAY_PORT:-8090}:${GATEWAY_PORT:-8090}"
@@ -68,3 +76,6 @@ networks:
   db:
     external: true
     name: smart-factoring-db
+  auth:
+    external: true
+    name: smart-factoring-auth

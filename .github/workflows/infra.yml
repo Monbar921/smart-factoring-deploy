@@ -1,12 +1,13 @@
 name: Infra
 
-# Раскатка общей инфраструктуры VDS (infra/docker-compose.yml: postgres на все стенды).
+# Раскатка общей инфраструктуры VDS (infra/docker-compose.yml: postgres и keycloak на все стенды).
 #   push в main с изменениями infra/** - автоматически
 #   workflow_dispatch                  - вручную
 #
 # Адрес и пользователь VDS - переменные репозитория, ключи и пароль администратора - секреты репозитория.
-# Администратор, лимиты и каталог postgres берутся из Environment test: postgres один на все стенды,
-# его настройки живут рядом с настройками test. См. README.md
+# Настройки postgres и keycloak (администраторы, лимиты, каталог, тестовый пользователь realm smart-factoring-test)
+# берутся из Environment test: инфраструктура одна на все стенды, её настройки живут рядом с настройками test.
+# См. README.md
 on:
   push:
     branches: [ "main" ]
@@ -19,7 +20,7 @@ on:
 permissions:
   contents: read
 
-# перезапуск postgres посреди другого перезапуска postgres ни к чему
+# перезапуск postgres/keycloak посреди другого такого же перезапуска ни к чему
 concurrency:
   group: deploy-infra
   cancel-in-progress: false
@@ -28,7 +29,7 @@ jobs:
   deploy:
     name: Deploy infra
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment: test
 
     env:
@@ -48,10 +49,17 @@ jobs:
           VDS_KNOWN_HOSTS: ${{ secrets.VDS_KNOWN_HOSTS }}
           POSTGRES_USER_ADMIN: ${{ vars.POSTGRES_USER_ADMIN }}
           POSTGRES_PASSWORD_ADMIN: ${{ secrets.POSTGRES_PASSWORD_ADMIN }}
+          KEYCLOAK_ADMIN: ${{ vars.KEYCLOAK_ADMIN }}
+          KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
+          KEYCLOAK_DB_USER: ${{ vars.KEYCLOAK_DB_USER }}
+          KEYCLOAK_DB_PASSWORD: ${{ secrets.KEYCLOAK_DB_PASSWORD }}
+          KEYCLOAK_TEST_USER: ${{ vars.KEYCLOAK_TEST_USER }}
+          KEYCLOAK_TEST_USER_PASSWORD: ${{ secrets.KEYCLOAK_TEST_USER_PASSWORD }}
         run: |
           missing=""
           [ -n "$VDS_INFRA_DIR" ] || [ -n "$VDS_DIR" ] || missing=" VDS_INFRA_DIR (или VDS_DIR окружения test)"
-          for name in VDS_HOST VDS_USER VDS_SSH_KEY VDS_KNOWN_HOSTS POSTGRES_USER_ADMIN POSTGRES_PASSWORD_ADMIN; do
+          for name in VDS_HOST VDS_USER VDS_SSH_KEY VDS_KNOWN_HOSTS POSTGRES_USER_ADMIN POSTGRES_PASSWORD_ADMIN \
+                      KEYCLOAK_ADMIN KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_USER KEYCLOAK_DB_PASSWORD KEYCLOAK_TEST_USER KEYCLOAK_TEST_USER_PASSWORD; do
             [ -n "${!name}" ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
@@ -77,16 +85,56 @@ jobs:
           POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
           POSTGRES_CPUS: ${{ vars.POSTGRES_CPUS }}
           POSTGRES_MEM_LIMIT: ${{ vars.POSTGRES_MEM_LIMIT }}
+          VDS_HOST: ${{ vars.VDS_HOST }}
+          KEYCLOAK_ADMIN: ${{ vars.KEYCLOAK_ADMIN }}
+          KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
+          KEYCLOAK_DB_USER: ${{ vars.KEYCLOAK_DB_USER }}
+          KEYCLOAK_DB_PASSWORD: ${{ secrets.KEYCLOAK_DB_PASSWORD }}
+          KEYCLOAK_PORT: ${{ vars.KEYCLOAK_PORT }}
+          KEYCLOAK_PUBLIC_URL: ${{ vars.KEYCLOAK_PUBLIC_URL }}
+          KEYCLOAK_CPUS: ${{ vars.KEYCLOAK_CPUS }}
+          KEYCLOAK_MEM_LIMIT: ${{ vars.KEYCLOAK_MEM_LIMIT }}
+          KEYCLOAK_TEST_USER: ${{ vars.KEYCLOAK_TEST_USER }}
+          KEYCLOAK_TEST_USER_PASSWORD: ${{ secrets.KEYCLOAK_TEST_USER_PASSWORD }}
+          KEYCLOAK_TEST_GATEWAY_URL: ${{ vars.KEYCLOAK_TEST_GATEWAY_URL }}
+          # порт gateway стенда test: из него по умолчанию строится redirect URI Swagger UI в realm test
+          GATEWAY_PORT: ${{ vars.GATEWAY_PORT }}
         run: |
           invalid=""
           check() { [ -z "${!1}" ] || [[ "${!1}" =~ $2 ]] || invalid="$invalid $1='${!1}' ($3);"; }
-          check POSTGRES_MEM_LIMIT '^[0-9]+[kKmMgG]$' "нужна единица: 512m, 1g"
-          check POSTGRES_CPUS '^[0-9]+(\.[0-9]+)?$' "число ядер: 1, 0.5"
-          check POSTGRES_PORT '^([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$' "порт 1-65535"
+          port='^([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$'
+          for name in POSTGRES_MEM_LIMIT KEYCLOAK_MEM_LIMIT; do
+            check "$name" '^[0-9]+[kKmMgG]$' "нужна единица: 512m, 1g"
+          done
+          for name in POSTGRES_CPUS KEYCLOAK_CPUS; do
+            check "$name" '^[0-9]+(\.[0-9]+)?$' "число ядер: 1, 0.5"
+          done
+          for name in POSTGRES_PORT KEYCLOAK_PORT GATEWAY_PORT; do
+            check "$name" "$port" "порт 1-65535"
+          done
+          for name in KEYCLOAK_PUBLIC_URL KEYCLOAK_TEST_GATEWAY_URL; do
+            check "$name" '^https?://[^/[:space:]]+$' "адрес без пути и / на конце: http://203.0.113.10:8180"
+          done
+          # логин подставляется в realm-файл (JSON) как есть
+          check KEYCLOAK_TEST_USER '^[A-Za-z0-9._-]+$' "латиница, цифры, . _ -"
+          # имя роли postgres: без кавычек в SQL - только строчная латиница, цифры и _
+          check KEYCLOAK_DB_USER '^[a-z_][a-z0-9_]{0,62}$' "строчная латиница, цифры, _; не с цифры"
+          # пароли подставляются в realm-файл (JSON) и в .env в одинарных кавычках
+          bad_chars="['\"\\\\]"
+          for name in POSTGRES_PASSWORD_ADMIN KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_TEST_USER_PASSWORD; do
+            if [[ "${!name}" =~ $bad_chars ]]; then
+              invalid="$invalid $name (без кавычек и обратной косой черты);"
+            fi
+          done
           if [ -n "$invalid" ]; then
             echo "::error::Некорректные переменные:$invalid"
             exit 1
           fi
+
+          host="$(printf '%s' "$VDS_HOST" | tr -d '[:space:]')"
+          keycloak_public_url="${KEYCLOAK_PUBLIC_URL:-http://${host}:${KEYCLOAK_PORT:-8180}}"
+          test_gateway_url="${KEYCLOAK_TEST_GATEWAY_URL:-http://${host}:${GATEWAY_PORT:-8090}}"
+          echo "Keycloak: ${keycloak_public_url}, redirect Swagger UI test: ${test_gateway_url}" >> "$GITHUB_STEP_SUMMARY"
 
           umask 077
           {
@@ -95,22 +143,47 @@ jobs:
             echo "POSTGRES_PORT=${POSTGRES_PORT:-5432}"
             echo "POSTGRES_CPUS=${POSTGRES_CPUS:-1}"
             echo "POSTGRES_MEM_LIMIT=${POSTGRES_MEM_LIMIT:-512m}"
+            echo "KEYCLOAK_ADMIN='${KEYCLOAK_ADMIN}'"
+            echo "KEYCLOAK_ADMIN_PASSWORD='${KEYCLOAK_ADMIN_PASSWORD}'"
+            echo "KEYCLOAK_DB_USER='${KEYCLOAK_DB_USER}'"
+            echo "KEYCLOAK_DB_PASSWORD='${KEYCLOAK_DB_PASSWORD}'"
+            echo "KEYCLOAK_PORT=${KEYCLOAK_PORT:-8180}"
+            echo "KEYCLOAK_PUBLIC_URL=${keycloak_public_url}"
+            echo "KEYCLOAK_CPUS=${KEYCLOAK_CPUS:-1}"
+            echo "KEYCLOAK_MEM_LIMIT=${KEYCLOAK_MEM_LIMIT:-1g}"
+            echo "KEYCLOAK_TEST_USER=${KEYCLOAK_TEST_USER}"
+            echo "KEYCLOAK_TEST_USER_PASSWORD='${KEYCLOAK_TEST_USER_PASSWORD}'"
+            echo "KEYCLOAK_TEST_GATEWAY_URL=${test_gateway_url}"
           } > infra.env
 
       - name: Upload files
         run: |
           ssh vds "mkdir -p '$INFRA_DIR'"
           scp infra/docker-compose.yml vds:"$INFRA_DIR/docker-compose.yml"
+          # realm-файлы и скрипты keycloak: только актуальные, удалённый из репозитория не должен остаться на VDS
+          ssh vds "rm -rf '$INFRA_DIR/keycloak' && mkdir -p '$INFRA_DIR/keycloak'"
+          scp -r infra/keycloak/. vds:"$INFRA_DIR/keycloak/"
           scp infra.env vds:"$INFRA_DIR/.env"
           ssh vds "chmod 600 '$INFRA_DIR/.env'"
 
-      # postgres пересоздаётся, только если изменились его настройки; данные в volume сохраняются
-      - name: Pull and start
+      # контейнеры пересоздаются, только если изменились их настройки; данные в volume сохраняются
+      - name: Pull and start postgres
         run: |
-          ssh vds "cd '$INFRA_DIR' && docker compose pull && docker compose up -d --remove-orphans --wait --wait-timeout 120"
+          ssh vds "cd '$INFRA_DIR' && docker compose pull && docker compose up -d --remove-orphans --wait --wait-timeout 120 postgres"
+
+      # повторяемо: создаёт базу keycloak и пользователя KEYCLOAK_DB_USER, если их нет, и выставляет пароль из секрета
+      - name: Prepare keycloak database
+        run: |
+          ssh vds 'cd "'"$INFRA_DIR"'" && set -a && . ./.env && set +a && docker compose exec -T postgres psql -U "$POSTGRES_USER_ADMIN" -d postgres -v ON_ERROR_STOP=1 -v user="$KEYCLOAK_DB_USER" -v pw="$KEYCLOAK_DB_PASSWORD" < keycloak/init-db.sql'
+
+      # первый старт keycloak - до пары минут: сборка конфигурации, схема базы, импорт realm
+      - name: Start keycloak
+        run: |
+          ssh vds "cd '$INFRA_DIR' && docker compose up -d --remove-orphans --wait --wait-timeout 300"
 
       - name: Status
         if: always()
         run: |
           ssh vds "cd '$INFRA_DIR' && docker compose ps" || true
           ssh vds "cd '$INFRA_DIR' && docker compose logs --tail 50 postgres" || true
+          ssh vds "cd '$INFRA_DIR' && docker compose logs --tail 100 keycloak" || true

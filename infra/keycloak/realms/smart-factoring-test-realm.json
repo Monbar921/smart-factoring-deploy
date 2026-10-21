@@ -1,0 +1,67 @@
+{
+  "realm": "smart-factoring-test",
+  "displayName": "smart-factoring (test)",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 3600,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "user",
+        "description": "Пользователь smart-factoring"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "smart-factoring-swagger",
+      "name": "Swagger UI gateway",
+      "description": "Кнопка Authorize в Swagger UI gateway: Authorization Code + PKCE. Для curl - ещё и password grant.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "${KEYCLOAK_TEST_GATEWAY_URL}/swagger-ui/oauth2-redirect.html"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "${KEYCLOAK_TEST_USER}",
+      "enabled": true,
+      "email": "${KEYCLOAK_TEST_USER}@smart-factoring.test",
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${KEYCLOAK_TEST_USER_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "user"
+      ]
+    }
+  ]
+}
