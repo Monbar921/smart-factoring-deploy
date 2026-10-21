@@ -169,7 +169,9 @@ jobs:
       # контейнеры пересоздаются, только если изменились их настройки; данные в volume сохраняются
       - name: Pull and start postgres
         run: |
-          ssh vds "cd '$INFRA_DIR' && docker compose pull && docker compose up -d --remove-orphans --wait --wait-timeout 120 postgres"
+          # pull с повтором: единичный обрыв загрузки большого слоя не должен валить выкатку
+          ssh vds "cd '$INFRA_DIR' && for attempt in 1 2 3; do docker compose pull --quiet && break; [ \$attempt = 3 ] && exit 1; echo \"pull failed, retry \$attempt\"; sleep 15; done"
+          ssh vds "cd '$INFRA_DIR' && docker compose up -d --remove-orphans --wait --wait-timeout 120 postgres"
 
       # повторяемо: создаёт базу keycloak и пользователя KEYCLOAK_DB_USER, если их нет, и выставляет пароль из секрета
       - name: Prepare keycloak database

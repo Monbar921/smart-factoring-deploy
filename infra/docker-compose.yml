@@ -29,7 +29,9 @@ services:
       retries: 10
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.1
+    # с Docker Hub, а не quay.io: CDN quay.io с VDS отдаёт слои с таймаутами.
+    # Тот же образ, что quay.io/keycloak/keycloak:26.8.1 - дайджест совпадает, закреплён им
+    image: keycloak/keycloak:26.8.1@sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244
     restart: unless-stopped
     # --import-realm: realm-файлы из ./keycloak/realms импортируются, только если такого realm ещё нет
     command: [ "start", "--import-realm" ]
