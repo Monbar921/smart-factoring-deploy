@@ -4,7 +4,7 @@ name: Deploy
 #   repository_dispatch (event_type: deploy) - из CI/CD smart-factoring-backend / smart-factoring-gateway
 #                                              после сборки образа,
 #                                              client_payload: { service, branch, image, tag, digest, sha }
-#   workflow_dispatch                        - ручной деплой/откат: окружение + сервис + тег образа
+#   workflow_dispatch                        - ручной деплой/откат: окружение + сервис (или "все") + тег образа
 #
 # Ветка сервиса -> окружение: main -> prod, всё остальное -> test.
 # Обновляется тег только пришедшего сервиса, тег второго берётся из текущего .env на VDS
@@ -23,9 +23,9 @@ on:
         options: [ test, prod ]
         default: test
       service:
-        description: Сервис
+        description: Сервис ("все" - backend и gateway с одним тегом, например test или main)
         type: choice
-        options: [ backend, gateway ]
+        options: [ backend, gateway, все ]
         default: backend
       tag:
         description: Тег образа (short sha, test, main)
@@ -67,6 +67,7 @@ jobs:
           fi
           case "$service" in
             backend|gateway) ;;
+            все) service=all ;;
             *) echo "::error::Неизвестный сервис: '$service'"; exit 1 ;;
           esac
           if ! [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
@@ -76,7 +77,8 @@ jobs:
           echo "environment=$environment" >> "$GITHUB_OUTPUT"
           echo "service=$service" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "Deploy smart-factoring-$service:$tag -> $environment" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$service" = "all" ]; then name="smart-factoring-{backend,gateway}"; else name="smart-factoring-$service"; fi
+          echo "Deploy $name:$tag -> $environment" >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     name: Deploy ${{ needs.target.outputs.service }} to ${{ needs.target.outputs.environment }}
@@ -132,7 +134,7 @@ jobs:
           ssh-key: ${{ secrets.VDS_SSH_KEY }}
           known-hosts: ${{ secrets.VDS_KNOWN_HOSTS }}
 
-      # тег пришедшего сервиса - из dispatch, остальных - как сейчас на стенде
+      # тег пришедшего сервиса (при "все" - всех) - из dispatch/запуска, остальных - как сейчас на стенде
       - name: Resolve image tags
         id: tags
         run: |
@@ -140,7 +142,7 @@ jobs:
           if [ "$ENVIRONMENT" = "prod" ]; then branch_tag=main; else branch_tag=test; fi
           for service in backend gateway; do
             key="${service^^}_TAG"
-            if [ "$service" = "$SERVICE" ]; then
+            if [ "$SERVICE" = "all" ] || [ "$service" = "$SERVICE" ]; then
               tag="$SERVICE_TAG"
             else
               tag="$(printf '%s\n' "$current" | sed -n "s/^${key}=//p" | tail -n 1)"
@@ -255,7 +257,8 @@ jobs:
         if: always()
         run: |
           ssh vds "cd '$VDS_DIR' && docker compose ps" || true
-          ssh vds "cd '$VDS_DIR' && docker compose logs --tail 100 '$SERVICE'" || true
+          if [ "$SERVICE" = "all" ]; then services=""; else services="$SERVICE"; fi
+          ssh vds "cd '$VDS_DIR' && docker compose logs --tail 100 $services" || true
 
       - name: Cleanup old images
         if: success()
