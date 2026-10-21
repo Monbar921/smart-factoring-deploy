@@ -1,12 +1,13 @@
-# Стенд smart-factoring (test или prod): backend + gateway.
+# Стенд smart-factoring (test или prod): backend + gateway + ui.
 # Переменные берутся из .env рядом с файлом: на VDS его пишет deploy workflow, локально - копия .env.example
 #
 # Postgres и keycloak общие для всех стендов и раскатываются отдельно (infra/docker-compose.yml, workflow infra.yml):
 # backend ходит в postgres через сеть smart-factoring-db, у стенда в нём своя база и свой пользователь;
 # gateway берёт ключи подписи токенов у keycloak через сеть smart-factoring-auth, у стенда в нём свой realm.
 #
-# Снаружи доступен только gateway; backend - только внутри сети стенда:
-#   клиент -> gateway :GATEWAY_PORT -> backend:BACKEND_PORT -> postgres:5432 (сеть smart-factoring-db)
+# Снаружи доступны ui и gateway; backend - только внутри сети стенда:
+#   браузер -> ui :UI_PORT (nginx: статика, /api -> gateway) -> gateway:GATEWAY_PORT -> backend:BACKEND_PORT
+#   клиент  -> gateway :GATEWAY_PORT -> backend:BACKEND_PORT -> postgres:5432 (сеть smart-factoring-db)
 # Порты приложений задаются через SERVER_PORT: Spring Boot берёт его вместо server.port из application.yml
 name: ${COMPOSE_PROJECT_NAME:-smart-factoring}
 
@@ -69,6 +70,33 @@ services:
       interval: 10s
       timeout: 5s
       start_period: 60s
+      retries: 6
+
+  ui:
+    image: ghcr.io/monbar921/smart-factoring-ui:${UI_TAG:?UI_TAG is required}
+    restart: unless-stopped
+    # nginx находит gateway через DNS docker при каждом запросе: стартует и без него, пока gateway поднимается - 502
+    depends_on:
+      gateway:
+        condition: service_started
+    environment:
+      SERVER_PORT: ${UI_PORT:-8070}
+      # /api проксируется в gateway по сети стенда: UI и API на одном origin, CORS не нужен
+      GATEWAY_URI: http://gateway:${GATEWAY_PORT:-8090}
+      # пишутся в config.js для браузера: вход пользователя на странице keycloak realm стенда
+      KEYCLOAK_URL: ${KEYCLOAK_PUBLIC_URL:?KEYCLOAK_PUBLIC_URL is required}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:?KEYCLOAK_REALM is required}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_UI_CLIENT_ID:-smart-factoring-ui}
+    ports:
+      - "${UI_PORT:-8070}:${UI_PORT:-8070}"
+    cpus: ${UI_CPUS:-0.25}
+    mem_limit: ${UI_MEM_LIMIT:-128m}
+    # localhost в alpine - сначала ::1, а nginx слушает только IPv4
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:$${SERVER_PORT}/healthz | grep -q UP" ]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
       retries: 6
 
 networks:

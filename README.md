@@ -1,7 +1,7 @@
 # smart-factoring-deploy
 
 Раскатка smart-factoring на VDS через docker compose: общие `postgres` и `keycloak` + стенды `test` и `prod`
-(`backend` + `gateway`).
+(`backend` + `gateway` + `ui`).
 
 ```
                          стенд test (smart-factoring-test)                infra (smart-factoring-infra)
@@ -14,7 +14,9 @@
 ```
 
 - Postgres и keycloak одни на все стенды. У каждого стенда в postgres своя база и пользователь, в keycloak - свой realm.
-- Снаружи открыты gateway и страница логина keycloak. Backend доступен только внутри сети своего стенда.
+- Снаружи открыты ui, gateway и страница логина keycloak. UI - nginx: отдаёт статику и проксирует `/api` в gateway
+  своего стенда, браузер ходит в API с того же origin, что и UI (без CORS). Пользователь входит на странице keycloak,
+  UI получает его токен (Authorization Code + PKCE) и шлёт его в gateway. Backend доступен только внутри сети своего стенда.
   Postgres - ещё и на `127.0.0.1` VDS для IDE через ssh-туннель.
 - Пользователя проверяет gateway: подпись токена по ключам realm, issuer, срок действия. Без действующего токена -
   401, до backend запрос не доходит. Backend получает тот же заголовок `Authorization` и только читает payload.
@@ -40,12 +42,13 @@
 
 ### Стенды
 
-1. CI/CD [smart-factoring-backend](https://github.com/Monbar921/smart-factoring-backend) и
-   [smart-factoring-gateway](https://github.com/Monbar921/smart-factoring-gateway) собирают образ
+1. CI/CD [smart-factoring-backend](https://github.com/Monbar921/smart-factoring-backend),
+   [smart-factoring-gateway](https://github.com/Monbar921/smart-factoring-gateway) и
+   [smart-factoring-ui](https://github.com/Monbar921/smart-factoring-ui) собирают образ
    `ghcr.io/monbar921/smart-factoring-<сервис>:<short sha>` и шлют сюда `repository_dispatch` (`event_type: deploy`).
 2. [deploy.yml](.github/workflows/deploy.yml) выбирает окружение по ветке сервиса: `main` → `prod`, остальное → `test`.
-3. Обновляется тег только пришедшего сервиса. Тег второго берётся из текущего `.env` на VDS, а если стенд ещё
-   пустой - тег ветки окружения (`test` или `main`), который CI сервиса ставит при каждой сборке.
+3. Обновляется тег только пришедшего сервиса. Теги остальных берутся из текущего `.env` на VDS, а если стенд ещё
+   пустой (или сервис в нём новый) - тег ветки окружения (`test` или `main`), который CI сервиса ставит при каждой сборке.
 4. По SSH кладёт на VDS в `VDS_DIR` файлы `docker-compose.yml` и `.env` (из секретов окружения),
    делает `docker compose pull` и `docker compose up -d --wait`: job зелёный, только если все сервисы прошли healthcheck.
 
@@ -100,12 +103,25 @@ Realm-файлы - [infra/keycloak/realms](infra/keycloak/realms), сейчас 
 - роль `user` и тестовый пользователь `KEYCLOAK_TEST_USER` с паролем `KEYCLOAK_TEST_USER_PASSWORD` и этой ролью;
 - клиент `smart-factoring-swagger`: публичный, Authorization Code + PKCE для кнопки Authorize в Swagger UI
   (redirect - `KEYCLOAK_TEST_GATEWAY_URL/swagger-ui/oauth2-redirect.html`) и password grant для curl;
+- клиент `smart-factoring-ui`: публичный, Authorization Code + PKCE для входа в UI (redirect - `KEYCLOAK_TEST_UI_URL/*`,
+  а также `http://localhost:5173/*` для `npm run dev` против стенда test);
 - `sslRequired: none`: стенд по HTTP. Для prod - только с HTTPS.
 
 **Realm импортируется, только если его ещё нет.** Правки realm-файла, логина или пароля тестового пользователя
 после первого импорта не применяются: менять в админке или удалить realm в админке и перезапустить Infra.
 
 Realm для prod (`smart-factoring-prod`) пока нет: стенд prod без него не пустит ни одного запроса.
+
+#### Клиент UI в уже импортированном realm
+
+Клиент `smart-factoring-ui` добавлен в realm-файл после первого импорта - на VDS его нужно создать в админке один раз:
+realm `smart-factoring-test` → Clients → **Create client**:
+
+1. Client type `OpenID Connect`, Client ID `smart-factoring-ui` → Next.
+2. Client authentication **Off** (публичный), Authentication flow - только **Standard flow** → Next.
+3. Root URL и Home URL - адрес UI test (`http://<VDS>:<UI_PORT>`), Valid redirect URIs - `http://<VDS>:<UI_PORT>/*`,
+   `http://localhost:5173/*`, `http://127.0.0.1:5173/*`; Valid post logout redirect URIs и Web origins - `+` → Save.
+4. Вкладка Advanced → Proof Key for Code Exchange Code Challenge Method - `S256` → Save.
 
 ### Токен
 
@@ -135,7 +151,7 @@ ssh -L 8180:127.0.0.1:<KEYCLOAK_PORT> deploy@<host>
 ### Доступ к образу
 
 Образы лежат в пакетах репозиториев сервисов. Чтобы `GITHUB_TOKEN` этого репозитория мог их скачать,
-для **каждого** пакета (`smart-factoring-backend`, `smart-factoring-gateway`):
+для **каждого** пакета (`smart-factoring-backend`, `smart-factoring-gateway`, `smart-factoring-ui`):
 github.com/Monbar921 → Packages → пакет → Package settings → **Manage Actions access** →
 Add repository → `smart-factoring-deploy`, роль **Read**. Либо пакет публичный.
 
@@ -172,6 +188,10 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `BACKEND_MEM_LIMIT` | `1g` | лимит памяти backend, куча JVM - 75% от него, необязательно |
 | Variable | `GATEWAY_CPUS` | `0.5` | лимит CPU gateway, необязательно |
 | Variable | `GATEWAY_MEM_LIMIT` | `512m` | лимит памяти gateway, необязательно |
+| Variable | `UI_PORT` | `8071` для test, `8070` для prod | порт nginx UI, открыт на VDS, необязательно, по умолчанию 8070 |
+| Variable | `UI_CPUS` | `0.25` | лимит CPU ui, необязательно |
+| Variable | `UI_MEM_LIMIT` | `128m` | лимит памяти ui, необязательно |
+| Variable | `KEYCLOAK_UI_CLIENT_ID` | `smart-factoring-ui` | клиент UI в realm стенда, необязательно, по умолчанию `smart-factoring-ui` |
 | Variable | `KEYCLOAK_REALM` | `smart-factoring-test` | realm стенда, необязательно, по умолчанию `smart-factoring-<окружение>` |
 
 Только в `test` - настройки общих postgres и keycloak (workflow Infra запускается в окружении `test`):
@@ -192,6 +212,7 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `KEYCLOAK_PORT` | `8180` | публичный порт keycloak, необязательно, по умолчанию 8180 |
 | Variable | `KEYCLOAK_PUBLIC_URL` | `http://203.0.113.10:8180` | адрес keycloak для браузера и `iss` токенов, необязательно, по умолчанию `http://VDS_HOST:KEYCLOAK_PORT` |
 | Variable | `KEYCLOAK_TEST_GATEWAY_URL` | `http://203.0.113.10:8091` | адрес gateway test для redirect Swagger UI, необязательно, по умолчанию `http://VDS_HOST:GATEWAY_PORT` |
+| Variable | `KEYCLOAK_TEST_UI_URL` | `http://203.0.113.10:8071` | адрес UI test для redirect после входа, необязательно, по умолчанию `http://VDS_HOST:UI_PORT` |
 | Variable | `KEYCLOAK_CPUS` | `1` | лимит CPU keycloak, необязательно |
 | Variable | `KEYCLOAK_MEM_LIMIT` | `1g` | лимит памяти keycloak, необязательно |
 
@@ -200,7 +221,7 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 
 `KEYCLOAK_PUBLIC_URL` (если задан) нужен и в `prod`: из него gateway стенда собирает issuer.
 
-У окружений должны различаться `VDS_DIR`, `GATEWAY_PORT` и база/пользователь. `BACKEND_PORT` может совпадать:
+У окружений должны различаться `VDS_DIR`, `GATEWAY_PORT`, `UI_PORT` и база/пользователь. `BACKEND_PORT` может совпадать:
 у каждого стенда своя сеть.
 
 Для `prod` можно включить Required reviewers: деплой будет ждать подтверждения. Для `test` - не включать:

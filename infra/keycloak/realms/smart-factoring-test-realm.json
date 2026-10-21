@@ -42,6 +42,32 @@
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "+"
       }
+    },
+    {
+      "clientId": "smart-factoring-ui",
+      "name": "smart-factoring-ui",
+      "description": "Вход пользователя в UI: Authorization Code + PKCE. localhost:5173 - npm run dev против стенда test.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "${KEYCLOAK_TEST_UI_URL}",
+      "baseUrl": "/",
+      "redirectUris": [
+        "${KEYCLOAK_TEST_UI_URL}/*",
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      }
     }
   ],
   "users": [

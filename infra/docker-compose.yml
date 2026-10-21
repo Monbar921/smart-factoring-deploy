@@ -59,6 +59,7 @@ services:
       KEYCLOAK_TEST_USER: ${KEYCLOAK_TEST_USER:?KEYCLOAK_TEST_USER is required}
       KEYCLOAK_TEST_USER_PASSWORD: ${KEYCLOAK_TEST_USER_PASSWORD:?KEYCLOAK_TEST_USER_PASSWORD is required}
       KEYCLOAK_TEST_GATEWAY_URL: ${KEYCLOAK_TEST_GATEWAY_URL:?KEYCLOAK_TEST_GATEWAY_URL is required}
+      KEYCLOAK_TEST_UI_URL: ${KEYCLOAK_TEST_UI_URL:?KEYCLOAK_TEST_UI_URL is required}
     volumes:
       - ./keycloak/realms:/opt/keycloak/data/import:ro
     # страница логина открывается в браузере - порт публичный
