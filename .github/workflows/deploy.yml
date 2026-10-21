@@ -10,7 +10,8 @@ name: Deploy
 # Обновляется тег только пришедшего сервиса, тег второго берётся из текущего .env на VDS
 # (если стенд ещё пустой - тег ветки окружения: test или main).
 # Postgres общий для стендов и раскатывается отдельно (workflow infra.yml) - здесь только база/пользователь стенда.
-# Секреты и переменные - в GitHub Environments test/prod, см. README.md
+# Адрес и пользователь VDS - переменные репозитория, ключи - секреты репозитория,
+# настройки стенда - в GitHub Environments test/prod, см. README.md
 on:
   repository_dispatch:
     types: [ deploy ]
@@ -97,8 +98,8 @@ jobs:
       ENVIRONMENT: ${{ needs.target.outputs.environment }}
       SERVICE: ${{ needs.target.outputs.service }}
       SERVICE_TAG: ${{ needs.target.outputs.tag }}
-      VDS_HOST: ${{ secrets.VDS_HOST }}
-      VDS_USER: ${{ secrets.VDS_USER }}
+      VDS_HOST: ${{ vars.VDS_HOST }}
+      VDS_USER: ${{ vars.VDS_USER }}
       VDS_DIR: ${{ vars.VDS_DIR }}
 
     steps:
@@ -126,8 +127,8 @@ jobs:
       - name: Setup SSH
         uses: ./.github/actions/vds-ssh
         with:
-          host: ${{ secrets.VDS_HOST }}
-          user: ${{ secrets.VDS_USER }}
+          host: ${{ vars.VDS_HOST }}
+          user: ${{ vars.VDS_USER }}
           ssh-key: ${{ secrets.VDS_SSH_KEY }}
           known-hosts: ${{ secrets.VDS_KNOWN_HOSTS }}
 
@@ -190,6 +191,7 @@ jobs:
           POSTGRES_SCHEMA: ${{ vars.POSTGRES_SCHEMA }}
           POSTGRES_DB: ${{ vars.POSTGRES_DB }}
           POSTGRES_POOL: ${{ vars.POSTGRES_POOL }}
+          COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT }}
           BACKEND_CPUS: ${{ vars.BACKEND_CPUS }}
           BACKEND_MEM_LIMIT: ${{ vars.BACKEND_MEM_LIMIT }}
@@ -216,7 +218,7 @@ jobs:
 
           umask 077
           {
-            echo "COMPOSE_PROJECT_NAME=smart-factoring-${ENVIRONMENT}"
+            echo "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-smart-factoring-${ENVIRONMENT}}"
             echo "BACKEND_TAG=${BACKEND_TAG}"
             echo "BACKEND_PORT=${BACKEND_PORT:-8080}"
             echo "BACKEND_CPUS=${BACKEND_CPUS:-1}"

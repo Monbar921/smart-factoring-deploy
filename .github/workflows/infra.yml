@@ -4,7 +4,9 @@ name: Infra
 #   push в main с изменениями infra/** - автоматически
 #   workflow_dispatch                  - вручную
 #
-# Секреты и переменные - уровня репозитория (не окружений): инфраструктура одна на test и prod, см. README.md
+# Адрес и пользователь VDS - переменные репозитория, ключи и пароль администратора - секреты репозитория.
+# Администратор, лимиты и каталог postgres берутся из Environment test: postgres один на все стенды,
+# его настройки живут рядом с настройками test. См. README.md
 on:
   push:
     branches: [ "main" ]
@@ -27,9 +29,12 @@ jobs:
     name: Deploy infra
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: test
 
     env:
+      # если не задан - каталог infra рядом с каталогом стенда test: /home/deploy/smart-factoring/test -> .../infra
       VDS_INFRA_DIR: ${{ vars.VDS_INFRA_DIR }}
+      VDS_DIR: ${{ vars.VDS_DIR }}
 
     steps:
       - name: Checkout
@@ -37,27 +42,31 @@ jobs:
 
       - name: Check configuration
         env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}
-          VDS_USER: ${{ secrets.VDS_USER }}
+          VDS_HOST: ${{ vars.VDS_HOST }}
+          VDS_USER: ${{ vars.VDS_USER }}
           VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
           VDS_KNOWN_HOSTS: ${{ secrets.VDS_KNOWN_HOSTS }}
           POSTGRES_USER_ADMIN: ${{ vars.POSTGRES_USER_ADMIN }}
           POSTGRES_PASSWORD_ADMIN: ${{ secrets.POSTGRES_PASSWORD_ADMIN }}
         run: |
           missing=""
-          for name in VDS_HOST VDS_USER VDS_SSH_KEY VDS_KNOWN_HOSTS VDS_INFRA_DIR POSTGRES_USER_ADMIN POSTGRES_PASSWORD_ADMIN; do
+          [ -n "$VDS_INFRA_DIR" ] || [ -n "$VDS_DIR" ] || missing=" VDS_INFRA_DIR (или VDS_DIR окружения test)"
+          for name in VDS_HOST VDS_USER VDS_SSH_KEY VDS_KNOWN_HOSTS POSTGRES_USER_ADMIN POSTGRES_PASSWORD_ADMIN; do
             [ -n "${!name}" ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
-            echo "::error::В Settings → Secrets and variables → Actions (уровень репозитория) не заданы:$missing"
+            echo "::error::Не заданы (репозиторий или Environment test):$missing"
             exit 1
           fi
+          infra_dir="${VDS_INFRA_DIR:-$(dirname "$VDS_DIR")/infra}"
+          echo "INFRA_DIR=$infra_dir" >> "$GITHUB_ENV"
+          echo "Каталог infra на VDS: $infra_dir" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup SSH
         uses: ./.github/actions/vds-ssh
         with:
-          host: ${{ secrets.VDS_HOST }}
-          user: ${{ secrets.VDS_USER }}
+          host: ${{ vars.VDS_HOST }}
+          user: ${{ vars.VDS_USER }}
           ssh-key: ${{ secrets.VDS_SSH_KEY }}
           known-hosts: ${{ secrets.VDS_KNOWN_HOSTS }}
 
@@ -90,18 +99,18 @@ jobs:
 
       - name: Upload files
         run: |
-          ssh vds "mkdir -p '$VDS_INFRA_DIR'"
-          scp infra/docker-compose.yml vds:"$VDS_INFRA_DIR/docker-compose.yml"
-          scp infra.env vds:"$VDS_INFRA_DIR/.env"
-          ssh vds "chmod 600 '$VDS_INFRA_DIR/.env'"
+          ssh vds "mkdir -p '$INFRA_DIR'"
+          scp infra/docker-compose.yml vds:"$INFRA_DIR/docker-compose.yml"
+          scp infra.env vds:"$INFRA_DIR/.env"
+          ssh vds "chmod 600 '$INFRA_DIR/.env'"
 
       # postgres пересоздаётся, только если изменились его настройки; данные в volume сохраняются
       - name: Pull and start
         run: |
-          ssh vds "cd '$VDS_INFRA_DIR' && docker compose pull && docker compose up -d --remove-orphans --wait --wait-timeout 120"
+          ssh vds "cd '$INFRA_DIR' && docker compose pull && docker compose up -d --remove-orphans --wait --wait-timeout 120"
 
       - name: Status
         if: always()
         run: |
-          ssh vds "cd '$VDS_INFRA_DIR' && docker compose ps" || true
-          ssh vds "cd '$VDS_INFRA_DIR' && docker compose logs --tail 50 postgres" || true
+          ssh vds "cd '$INFRA_DIR' && docker compose ps" || true
+          ssh vds "cd '$INFRA_DIR' && docker compose logs --tail 50 postgres" || true

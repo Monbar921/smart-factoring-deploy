@@ -17,7 +17,7 @@
 
 | Что | Compose | Workflow | Каталог на VDS | Настройки |
 |---|---|---|---|---|
-| общий postgres | [infra/docker-compose.yml](infra/docker-compose.yml) | [infra.yml](.github/workflows/infra.yml) | `VDS_INFRA_DIR` | уровня репозитория |
+| общий postgres | [infra/docker-compose.yml](infra/docker-compose.yml) | [infra.yml](.github/workflows/infra.yml) | `VDS_INFRA_DIR` | репозиторий + Environment `test` |
 | стенд | [docker-compose.yml](docker-compose.yml) | [deploy.yml](.github/workflows/deploy.yml) | `VDS_DIR` | Environment `test`/`prod` |
 
 ## Как это работает
@@ -97,18 +97,11 @@ Settings → Secrets and variables → Actions → Repository secrets / variable
 
 | Тип | Имя | Пример | Описание |
 |---|---|---|---|
-| Secret | `VDS_HOST` | `203.0.113.10` | адрес VDS |
-| Secret | `VDS_USER` | `deploy` | пользователь в группе docker |
+| Variable | `VDS_HOST` | `203.0.113.10` | адрес VDS |
+| Variable | `VDS_USER` | `deploy` | пользователь в группе docker |
 | Secret | `VDS_SSH_KEY` | `-----BEGIN OPENSSH PRIVATE KEY-----...` | приватный ключ `smart-factoring-deploy` |
 | Secret | `VDS_KNOWN_HOSTS` | `203.0.113.10 ssh-ed25519 AAAA...` | ключ сервера |
-| Variable | `VDS_INFRA_DIR` | `/opt/smart-factoring/infra` | каталог infra на VDS |
-| Variable | `POSTGRES_USER_ADMIN` | `postgres` | суперпользователь postgres |
-| Secret | `POSTGRES_PASSWORD_ADMIN` | | его пароль, без одинарных кавычек |
-| Variable | `POSTGRES_PORT` | `5432` | порт postgres на 127.0.0.1 VDS, необязательно |
-| Variable | `POSTGRES_CPUS` | `1` | лимит CPU postgres, необязательно |
-| Variable | `POSTGRES_MEM_LIMIT` | `512m` | лимит памяти postgres, необязательно |
-
-`POSTGRES_USER_ADMIN` и `POSTGRES_PASSWORD_ADMIN` применяются только при первом запуске пустого volume.
+| Secret | `POSTGRES_PASSWORD_ADMIN` | | пароль суперпользователя postgres, без одинарных кавычек |
 
 ### Environments
 
@@ -116,11 +109,13 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 
 | Тип | Имя | Пример | Описание |
 |---|---|---|---|
-| Variable | `VDS_DIR` | `/opt/smart-factoring/test` | каталог стенда, у каждого окружения свой |
+| Variable | `VDS_DIR` | `/home/deploy/smart-factoring/test` | каталог стенда, у каждого окружения свой |
+| Variable | `COMPOSE_PROJECT_NAME` | `smart-factoring-test` | имя compose-проекта стенда, необязательно, по умолчанию `smart-factoring-<окружение>` |
 | Variable | `POSTGRES_DB` | `smart_factoring_test` | база стенда в общем postgres |
-| Variable | `POSTGRES_USER` | `smart_factoring_test` | пользователь стенда |
+| Variable | `POSTGRES_USER` | `smart_factoring_app` | пользователь стенда |
 | Secret | `POSTGRES_PASSWORD` | | его пароль, без одинарных кавычек |
 | Variable | `POSTGRES_SCHEMA` | `smart_factoring_test` | схема стенда |
+| Variable | `POSTGRES_POOL` | `smart_factoring_backend_test` | имя пула Hikari, необязательно |
 | Variable | `GATEWAY_PORT` | `8091` для test, `8090` для prod | порт, который слушает gateway и который открыт на VDS, необязательно, по умолчанию 8090 |
 | Variable | `BACKEND_PORT` | `8080` | порт, который слушает backend внутри сети стенда, необязательно, по умолчанию 8080 |
 | Variable | `BACKEND_CPUS` | `1` | лимит CPU backend, можно дробное (`0.5`), необязательно |
@@ -128,10 +123,23 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `GATEWAY_CPUS` | `0.5` | лимит CPU gateway, необязательно |
 | Variable | `GATEWAY_MEM_LIMIT` | `512m` | лимит памяти gateway, необязательно |
 
+Только в `test` - настройки общего postgres (workflow Infra запускается в окружении `test`):
+
+| Тип | Имя | Пример | Описание |
+|---|---|---|---|
+| Variable | `POSTGRES_USER_ADMIN` | `smart_factoring` | суперпользователь postgres |
+| Variable | `VDS_INFRA_DIR` | `/home/deploy/smart-factoring/infra` | каталог infra на VDS, необязательно, по умолчанию `infra` рядом с `VDS_DIR` |
+| Variable | `POSTGRES_PORT` | `5432` | порт postgres на 127.0.0.1 VDS, необязательно |
+| Variable | `POSTGRES_CPUS` | `1` | лимит CPU postgres, необязательно |
+| Variable | `POSTGRES_MEM_LIMIT` | `512m` | лимит памяти postgres, необязательно |
+
+`POSTGRES_USER_ADMIN` и `POSTGRES_PASSWORD_ADMIN` применяются только при первом запуске пустого volume.
+
 У окружений должны различаться `VDS_DIR`, `GATEWAY_PORT` и база/пользователь. `BACKEND_PORT` может совпадать:
 у каждого стенда своя сеть.
 
-Для `prod` можно включить Required reviewers: деплой будет ждать подтверждения.
+Для `prod` можно включить Required reviewers: деплой будет ждать подтверждения. Для `test` - не включать:
+под ним же идёт Infra.
 
 ## Локальный запуск
 
