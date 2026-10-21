@@ -189,6 +189,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_SCHEMA: ${{ vars.POSTGRES_SCHEMA }}
           POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+          POSTGRES_POOL: ${{ vars.POSTGRES_POOL }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT }}
           BACKEND_CPUS: ${{ vars.BACKEND_CPUS }}
           BACKEND_MEM_LIMIT: ${{ vars.BACKEND_MEM_LIMIT }}
@@ -227,6 +228,8 @@ jobs:
             echo "POSTGRES_USER='${POSTGRES_USER}'"
             echo "POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'"
             echo "POSTGRES_SCHEMA='${POSTGRES_SCHEMA}'"
+            # пустое значение compose заменит на smart_factoring_backend
+            echo "POSTGRES_POOL='${POSTGRES_POOL}'"
             echo "POSTGRES_DB='${POSTGRES_DB}'"
           } > deploy.env
 
