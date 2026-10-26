@@ -49,7 +49,7 @@
 2. [deploy.yml](.github/workflows/deploy.yml) выбирает окружение по ветке сервиса: `main` → `prod`, остальное → `test`.
 3. Обновляется тег только пришедшего сервиса. Теги остальных берутся из текущего `.env` на VDS, а если стенд ещё
    пустой (или сервис в нём новый) - тег ветки окружения (`test` или `main`), который CI сервиса ставит при каждой сборке.
-4. По SSH кладёт на VDS в `VDS_DIR` файлы `docker-compose.yml` и `.env` (из секретов окружения),
+4. По SSH кладёт на VDS в `VDS_DIR` файлы `docker-compose.yml`, `.env` (из секретов окружения) и каталог `certs`,
    делает `docker compose pull` и `docker compose up -d --wait`: job зелёный, только если все сервисы прошли healthcheck.
 
 Ручной деплой или откат: Actions → Deploy → Run workflow, окружение + сервис + тег (short sha из истории сервиса).
@@ -146,6 +146,22 @@ ssh -L 8180:127.0.0.1:<KEYCLOAK_PORT> deploy@<host>
 Затем http://localhost:8180/admin, логин `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`. Администратор создаётся
 только при первом старте keycloak на пустой базе.
 
+## GigaChat
+
+Backend получает тексты карточек от GigaChat API при `LLM_MODE=gigachat` (переменная окружения стенда) и ключе
+`GIGACHAT_AUTH_KEY` (секрет). Без ключа deploy с `LLM_MODE=gigachat` останавливается до изменений на VDS.
+
+Сертификаты серверов GigaChat выданы НУЦ Минцифры, которого нет в JDK. Корневой «Russian Trusted Root CA»
+и выпускающие «Russian Trusted Sub CA», «Russian Trusted Sub CA 2024» (с портала Госуслуг) лежат одним PEM в
+[certs/russian_trusted_root_ca.pem](certs/russian_trusted_root_ca.pem): deploy копирует `certs` на VDS, backend
+монтирует его в `/certs` (`GIGACHAT_CA_CERT`). Сертификаты публичные, секретом не являются. Обновить - пересобрать файл:
+
+```bash
+for f in "Russian Trusted Root CA.cer" "Russian Trusted Sub CA.cer" "Russian Trusted Sub CA 2024.cer"; do
+  openssl x509 -inform DER -in "$f" 2>/dev/null || openssl x509 -inform PEM -in "$f"
+done > certs/russian_trusted_root_ca.pem
+```
+
 ## Настройка GitHub
 
 ### Доступ к образу
@@ -193,6 +209,9 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `UI_MEM_LIMIT` | `128m` | лимит памяти ui, необязательно |
 | Variable | `KEYCLOAK_UI_CLIENT_ID` | `smart-factoring-ui` | клиент UI в realm стенда, необязательно, по умолчанию `smart-factoring-ui` |
 | Variable | `KEYCLOAK_REALM` | `smart-factoring-test` | realm стенда, необязательно, по умолчанию `smart-factoring-<окружение>` |
+| Variable | `LLM_MODE` | `gigachat` | LLM backend: `stub` - шаблонные тексты (по умолчанию), `gigachat` - GigaChat API, `off` - без черновика |
+| Secret | `GIGACHAT_AUTH_KEY` | | ключ авторизации GigaChat API из личного кабинета (Base64), обязателен при `LLM_MODE=gigachat` |
+| Variable | `GIGACHAT_SCOPE` | `GIGACHAT_API_PERS` | тариф GigaChat: `GIGACHAT_API_PERS`, `GIGACHAT_API_B2B` или `GIGACHAT_API_CORP`, необязательно |
 
 Только в `test` - настройки общих postgres и keycloak (workflow Infra запускается в окружении `test`):
 

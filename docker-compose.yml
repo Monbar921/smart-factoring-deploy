@@ -31,6 +31,15 @@ services:
       POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:?POSTGRES_SCHEMA is required}
       POSTGRES_POOL: ${POSTGRES_POOL:-smart_factoring_backend}
       SERVER_PORT: ${BACKEND_PORT:-8080}
+      # LLM: stub - шаблонные тексты без LLM, gigachat - GigaChat API, off - без черновика сообщения клиенту
+      LLM_MODE: ${LLM_MODE:-stub}
+      # ключ авторизации GigaChat API (Base64 client_id:client_secret), нужен только при LLM_MODE=gigachat
+      GIGACHAT_AUTH_KEY: ${GIGACHAT_AUTH_KEY:-}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
+      # сертификаты GigaChat выданы НУЦ Минцифры, которого нет в JDK: корневой и выпускающие - из ./certs
+      GIGACHAT_CA_CERT: /certs/russian_trusted_root_ca.pem
+    volumes:
+      - ./certs:/certs:ro
     # куча JVM - 75% от mem_limit (MaxRAMPercentage), число потоков GC/пулов JVM считает от cpus
     cpus: ${BACKEND_CPUS:-1}
     mem_limit: ${BACKEND_MEM_LIMIT:-1g}

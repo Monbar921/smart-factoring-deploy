@@ -212,6 +212,9 @@ jobs:
           UI_CPUS: ${{ vars.UI_CPUS }}
           UI_MEM_LIMIT: ${{ vars.UI_MEM_LIMIT }}
           KEYCLOAK_UI_CLIENT_ID: ${{ vars.KEYCLOAK_UI_CLIENT_ID }}
+          LLM_MODE: ${{ vars.LLM_MODE }}
+          GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE }}
+          GIGACHAT_AUTH_KEY: ${{ secrets.GIGACHAT_AUTH_KEY }}
         run: |
           # ошибки в переменных окружения ловим здесь, а не на VDS: число без единицы в mem_limit - это байты
           invalid=""
@@ -219,6 +222,13 @@ jobs:
           check KEYCLOAK_PUBLIC_URL '^https?://[^/[:space:]]+$' "адрес без пути и / на конце: http://203.0.113.10:8180"
           check KEYCLOAK_REALM '^[A-Za-z0-9._-]+$' "имя realm: латиница, цифры, . _ -"
           check KEYCLOAK_UI_CLIENT_ID '^[A-Za-z0-9._-]+$' "id клиента: латиница, цифры, . _ -"
+          check LLM_MODE '^(stub|gigachat|off)$' "stub, gigachat или off"
+          check GIGACHAT_SCOPE '^GIGACHAT_API_(PERS|B2B|CORP)$' "GIGACHAT_API_PERS, GIGACHAT_API_B2B или GIGACHAT_API_CORP"
+          check GIGACHAT_AUTH_KEY '^[A-Za-z0-9+/=]+$' "ключ авторизации в Base64"
+          # без ключа backend с LLM_MODE=gigachat не стартует - ловим до деплоя
+          if [ "$LLM_MODE" = "gigachat" ] && [ -z "$GIGACHAT_AUTH_KEY" ]; then
+            invalid="$invalid LLM_MODE=gigachat без секрета GIGACHAT_AUTH_KEY;"
+          fi
           for name in BACKEND_MEM_LIMIT GATEWAY_MEM_LIMIT UI_MEM_LIMIT; do
             check "$name" '^[0-9]+[kKmMgG]$' "нужна единица: 512m, 1g"
           done
@@ -259,12 +269,17 @@ jobs:
             # пустое значение compose заменит на smart_factoring_backend
             echo "POSTGRES_POOL='${POSTGRES_POOL}'"
             echo "POSTGRES_DB='${POSTGRES_DB}'"
+            echo "LLM_MODE=${LLM_MODE:-stub}"
+            echo "GIGACHAT_SCOPE=${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}"
+            echo "GIGACHAT_AUTH_KEY='${GIGACHAT_AUTH_KEY}'"
           } > deploy.env
 
       - name: Upload files
         run: |
           ssh vds "mkdir -p '$VDS_DIR'"
           scp docker-compose.yml vds:"$VDS_DIR/docker-compose.yml"
+          # сертификаты НУЦ Минцифры для TLS к GigaChat, монтируются в backend (./certs:/certs)
+          scp -r certs vds:"$VDS_DIR/"
           scp deploy.env vds:"$VDS_DIR/.env"
           ssh vds "chmod 600 '$VDS_DIR/.env'"
 
