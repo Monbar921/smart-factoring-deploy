@@ -1,7 +1,7 @@
 name: Deploy
 
 # Раскатка docker-compose.yml на VDS.
-#   repository_dispatch (event_type: deploy) - из CI/CD smart-factoring-backend / smart-factoring-gateway / smart-factoring-ui
+#   repository_dispatch (event_type: deploy) - из CI/CD smart-factoring-backend / -gateway / -ui / -ml
 #                                              после сборки образа,
 #                                              client_payload: { service, branch, image, tag, digest, sha }
 #   workflow_dispatch                        - ручной деплой/откат: окружение + сервис (или "все") + тег образа
@@ -23,9 +23,9 @@ on:
         options: [ test, prod ]
         default: test
       service:
-        description: Сервис ("все" - backend, gateway и ui с одним тегом, например test или main)
+        description: Сервис ("все" - backend, gateway, ui и ml с одним тегом, например test или main)
         type: choice
-        options: [ backend, gateway, ui, все ]
+        options: [ backend, gateway, ui, ml, все ]
         default: backend
       tag:
         description: Тег образа (short sha, test, main)
@@ -66,7 +66,7 @@ jobs:
             tag="$INPUT_TAG"
           fi
           case "$service" in
-            backend|gateway|ui) ;;
+            backend|gateway|ui|ml) ;;
             все) service=all ;;
             *) echo "::error::Неизвестный сервис: '$service'"; exit 1 ;;
           esac
@@ -77,7 +77,7 @@ jobs:
           echo "environment=$environment" >> "$GITHUB_OUTPUT"
           echo "service=$service" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if [ "$service" = "all" ]; then name="smart-factoring-{backend,gateway,ui}"; else name="smart-factoring-$service"; fi
+          if [ "$service" = "all" ]; then name="smart-factoring-{backend,gateway,ui,ml}"; else name="smart-factoring-$service"; fi
           echo "Deploy $name:$tag -> $environment" >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
@@ -140,7 +140,7 @@ jobs:
         run: |
           current="$(ssh vds "cat '$VDS_DIR/.env' 2>/dev/null" || true)"
           if [ "$ENVIRONMENT" = "prod" ]; then branch_tag=main; else branch_tag=test; fi
-          for service in backend gateway ui; do
+          for service in backend gateway ui ml; do
             key="${service^^}_TAG"
             if [ "$SERVICE" = "all" ] || [ "$service" = "$SERVICE" ]; then
               tag="$SERVICE_TAG"
@@ -164,10 +164,11 @@ jobs:
           BACKEND_TAG: ${{ steps.tags.outputs.backend }}
           GATEWAY_TAG: ${{ steps.tags.outputs.gateway }}
           UI_TAG: ${{ steps.tags.outputs.ui }}
+          ML_TAG: ${{ steps.tags.outputs.ml }}
         run: |
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin > /dev/null
           missing=0
-          for image in "smart-factoring-backend:$BACKEND_TAG" "smart-factoring-gateway:$GATEWAY_TAG" "smart-factoring-ui:$UI_TAG"; do
+          for image in "smart-factoring-backend:$BACKEND_TAG" "smart-factoring-gateway:$GATEWAY_TAG" "smart-factoring-ui:$UI_TAG" "smart-factoring-ml:$ML_TAG"; do
             if docker manifest inspect "ghcr.io/monbar921/$image" > /dev/null 2>&1; then
               echo "ok: $image"
             else
@@ -192,6 +193,7 @@ jobs:
           BACKEND_TAG: ${{ steps.tags.outputs.backend }}
           GATEWAY_TAG: ${{ steps.tags.outputs.gateway }}
           UI_TAG: ${{ steps.tags.outputs.ui }}
+          ML_TAG: ${{ steps.tags.outputs.ml }}
           POSTGRES_USER: ${{ vars.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_SCHEMA: ${{ vars.POSTGRES_SCHEMA }}
@@ -212,6 +214,10 @@ jobs:
           UI_CPUS: ${{ vars.UI_CPUS }}
           UI_MEM_LIMIT: ${{ vars.UI_MEM_LIMIT }}
           KEYCLOAK_UI_CLIENT_ID: ${{ vars.KEYCLOAK_UI_CLIENT_ID }}
+          ML_MODE: ${{ vars.ML_MODE }}
+          ML_CPUS: ${{ vars.ML_CPUS }}
+          ML_MEM_LIMIT: ${{ vars.ML_MEM_LIMIT }}
+          ML_WORKERS: ${{ vars.ML_WORKERS }}
           LLM_MODE: ${{ vars.LLM_MODE }}
           LLM_PARALLELISM: ${{ vars.LLM_PARALLELISM }}
           GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL }}
@@ -233,10 +239,12 @@ jobs:
           if [ "$LLM_MODE" = "gigachat" ] && [ -z "$GIGACHAT_AUTH_KEY" ]; then
             invalid="$invalid LLM_MODE=gigachat без секрета GIGACHAT_AUTH_KEY;"
           fi
-          for name in BACKEND_MEM_LIMIT GATEWAY_MEM_LIMIT UI_MEM_LIMIT; do
+          check ML_MODE '^(http|stub)$' "http или stub"
+          check ML_WORKERS '^[1-9]$' "число процессов: 1-9"
+          for name in BACKEND_MEM_LIMIT GATEWAY_MEM_LIMIT UI_MEM_LIMIT ML_MEM_LIMIT; do
             check "$name" '^[0-9]+[kKmMgG]$' "нужна единица: 512m, 1g"
           done
-          for name in BACKEND_CPUS GATEWAY_CPUS UI_CPUS; do
+          for name in BACKEND_CPUS GATEWAY_CPUS UI_CPUS ML_CPUS; do
             check "$name" '^[0-9]+(\.[0-9]+)?$' "число ядер: 1, 0.5"
           done
           for name in BACKEND_PORT GATEWAY_PORT UI_PORT; do
@@ -262,6 +270,11 @@ jobs:
             echo "UI_PORT=${UI_PORT:-8070}"
             echo "UI_CPUS=${UI_CPUS:-0.25}"
             echo "UI_MEM_LIMIT=${UI_MEM_LIMIT:-128m}"
+            echo "ML_TAG=${ML_TAG}"
+            echo "ML_MODE=${ML_MODE:-http}"
+            echo "ML_CPUS=${ML_CPUS:-1}"
+            echo "ML_MEM_LIMIT=${ML_MEM_LIMIT:-512m}"
+            echo "ML_WORKERS=${ML_WORKERS:-1}"
             echo "KEYCLOAK_UI_CLIENT_ID=${KEYCLOAK_UI_CLIENT_ID:-smart-factoring-ui}"
             # так же, как в infra.yml: по умолчанию keycloak на VDS_HOST:KEYCLOAK_PORT, realm smart-factoring-<окружение>
             host="$(printf '%s' "$VDS_HOST" | tr -d '[:space:]')"

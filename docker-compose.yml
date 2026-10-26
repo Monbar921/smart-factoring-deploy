@@ -1,4 +1,4 @@
-# Стенд smart-factoring (test или prod): backend + gateway + ui.
+# Стенд smart-factoring (test или prod): backend + gateway + ui + ml (сервис моделей).
 # Переменные берутся из .env рядом с файлом: на VDS его пишет deploy workflow, локально - копия .env.example
 #
 # Postgres и keycloak общие для всех стендов и раскатываются отдельно (infra/docker-compose.yml, workflow infra.yml):
@@ -8,6 +8,7 @@
 # Снаружи доступны ui и gateway; backend - только внутри сети стенда:
 #   браузер -> ui :UI_PORT (nginx: статика, /api -> gateway) -> gateway:GATEWAY_PORT -> backend:BACKEND_PORT
 #   клиент  -> gateway :GATEWAY_PORT -> backend:BACKEND_PORT -> postgres:5432 (сеть smart-factoring-db)
+#   backend -> ml:8000 (PD и задержка оплаты), ml -> backend (LLM только через backend)
 # Порты приложений задаются через SERVER_PORT: Spring Boot берёт его вместо server.port из application.yml
 name: ${COMPOSE_PROJECT_NAME:-smart-factoring}
 
@@ -17,6 +18,10 @@ services:
     restart: unless-stopped
     # в образе нет ENTRYPOINT, команда запуска задаётся здесь
     command: [ "java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar" ]
+    # backend переживает недоступность ml (оценки получат «ошибку оценки»), ждать его healthcheck не нужно
+    depends_on:
+      ml:
+        condition: service_started
     # postgres в другом compose-проекте, depends_on на него невозможен:
     # если он недоступен, backend падает на старте и перезапускается (restart: unless-stopped)
     networks:
@@ -31,6 +36,9 @@ services:
       POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:?POSTGRES_SCHEMA is required}
       POSTGRES_POOL: ${POSTGRES_POOL:-smart_factoring_backend}
       SERVER_PORT: ${BACKEND_PORT:-8080}
+      # модели PD и задержки: http - сервис ml стенда, stub - встроенная заглушка backend
+      ML_MODE: ${ML_MODE:-http}
+      ML_BASE_URL: http://ml:8000
       # LLM: stub - шаблонные тексты без LLM, gigachat - GigaChat API, off - без черновика сообщения клиенту
       LLM_MODE: ${LLM_MODE:-stub}
       # одновременных запросов к GigaChat, не больше лимита тарифа (Freemium - 1 поток)
@@ -52,6 +60,29 @@ services:
       interval: 10s
       timeout: 5s
       start_period: 60s
+      retries: 6
+
+  ml:
+    image: ghcr.io/monbar921/smart-factoring-ml:${ML_TAG:?ML_TAG is required}
+    restart: unless-stopped
+    # наружу не публикуется: в ml ходит только backend по сети стенда
+    environment:
+      # процессов uvicorn: оценки считаются на CPU, больше cpus смысла нет
+      WEB_CONCURRENCY: ${ML_WORKERS:-1}
+      LOG_LEVEL: ${ML_LOG_LEVEL:-INFO}
+      # LLM для моделей - только через backend (GigaChat напрямую не вызывается)
+      BACKEND_LLM_URL: http://backend:${BACKEND_PORT:-8080}/internal/rest/llm
+      # обученные модели (модуль с create()), пусто - эвристики
+      PD_MODEL_MODULE: ${PD_MODEL_MODULE:-}
+      DELAY_MODEL_MODULE: ${DELAY_MODEL_MODULE:-}
+    cpus: ${ML_CPUS:-1}
+    mem_limit: ${ML_MEM_LIMIT:-512m}
+    # в python:slim нет curl/wget - проверка средствами python
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health')" ]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
       retries: 6
 
   gateway:

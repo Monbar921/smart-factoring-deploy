@@ -1,7 +1,7 @@
 # smart-factoring-deploy
 
 Раскатка smart-factoring на VDS через docker compose: общие `postgres` и `keycloak` + стенды `test` и `prod`
-(`backend` + `gateway` + `ui`).
+(`backend` + `gateway` + `ui` + `ml`).
 
 ```
                          стенд test (smart-factoring-test)                infra (smart-factoring-infra)
@@ -16,7 +16,8 @@
 - Postgres и keycloak одни на все стенды. У каждого стенда в postgres своя база и пользователь, в keycloak - свой realm.
 - Снаружи открыты ui, gateway и страница логина keycloak. UI - nginx: отдаёт статику и проксирует `/api` в gateway
   своего стенда, браузер ходит в API с того же origin, что и UI (без CORS). Пользователь входит на странице keycloak,
-  UI получает его токен (Authorization Code + PKCE) и шлёт его в gateway. Backend доступен только внутри сети своего стенда.
+  UI получает его токен (Authorization Code + PKCE) и шлёт его в gateway. Backend и ml (сервис моделей) доступны только
+  внутри сети своего стенда: backend ходит в `ml:8000` за PD и задержкой оплаты (`ML_MODE=http`).
   Postgres - ещё и на `127.0.0.1` VDS для IDE через ssh-туннель.
 - Пользователя проверяет gateway: подпись токена по ключам realm, issuer, срок действия. Без действующего токена -
   401, до backend запрос не доходит. Backend получает тот же заголовок `Authorization` и только читает payload.
@@ -44,7 +45,8 @@
 
 1. CI/CD [smart-factoring-backend](https://github.com/Monbar921/smart-factoring-backend),
    [smart-factoring-gateway](https://github.com/Monbar921/smart-factoring-gateway) и
-   [smart-factoring-ui](https://github.com/Monbar921/smart-factoring-ui) собирают образ
+   [smart-factoring-ui](https://github.com/Monbar921/smart-factoring-ui),
+   [smart-factoring-ml](https://github.com/Monbar921/smart-factoring-ml) собирают образ
    `ghcr.io/monbar921/smart-factoring-<сервис>:<short sha>` и шлют сюда `repository_dispatch` (`event_type: deploy`).
 2. [deploy.yml](.github/workflows/deploy.yml) выбирает окружение по ветке сервиса: `main` → `prod`, остальное → `test`.
 3. Обновляется тег только пришедшего сервиса. Теги остальных берутся из текущего `.env` на VDS, а если стенд ещё
@@ -167,11 +169,16 @@ done > certs/russian_trusted_root_ca.pem
 ### Доступ к образу
 
 Образы лежат в пакетах репозиториев сервисов. Чтобы `GITHUB_TOKEN` этого репозитория мог их скачать,
-для **каждого** пакета (`smart-factoring-backend`, `smart-factoring-gateway`, `smart-factoring-ui`):
+для **каждого** пакета (`smart-factoring-backend`, `smart-factoring-gateway`, `smart-factoring-ui`, `smart-factoring-ml`):
 github.com/Monbar921 → Packages → пакет → Package settings → **Manage Actions access** →
 Add repository → `smart-factoring-deploy`, роль **Read**. Либо пакет публичный.
 
 Пакет появляется после первой сборки образа в CI сервиса.
+
+**Сервис ml добавлен в стенд позже остальных**: пока в ghcr нет образа `smart-factoring-ml` с тегом окружения
+(`test` / `main`), deploy любого сервиса останавливается на проверке образов. Поэтому сначала - push в ветку `test`
+(`main`) репозитория smart-factoring-ml: его CI соберёт образ и сам запустит deploy. В smart-factoring-ml нужны те же
+`vars.DEPLOY_REPO` и `secrets.DEPLOY_TOKEN`, что у остальных сервисов, и Manage Actions access его пакета.
 
 ### Уровень репозитория
 
@@ -207,6 +214,10 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `UI_PORT` | `8071` для test, `8070` для prod | порт nginx UI, открыт на VDS, необязательно, по умолчанию 8070 |
 | Variable | `UI_CPUS` | `0.25` | лимит CPU ui, необязательно |
 | Variable | `UI_MEM_LIMIT` | `128m` | лимит памяти ui, необязательно |
+| Variable | `ML_MODE` | `http` | модели PD и задержки: `http` - сервис ml стенда (по умолчанию), `stub` - встроенная заглушка backend |
+| Variable | `ML_CPUS` | `1` | лимит CPU ml, необязательно |
+| Variable | `ML_MEM_LIMIT` | `512m` | лимит памяти ml, необязательно |
+| Variable | `ML_WORKERS` | `1` | процессов uvicorn ml, не больше `ML_CPUS`, необязательно |
 | Variable | `KEYCLOAK_UI_CLIENT_ID` | `smart-factoring-ui` | клиент UI в realm стенда, необязательно, по умолчанию `smart-factoring-ui` |
 | Variable | `KEYCLOAK_REALM` | `smart-factoring-test` | realm стенда, необязательно, по умолчанию `smart-factoring-<окружение>` |
 | Variable | `LLM_MODE` | `gigachat` | LLM backend: `stub` - шаблонные тексты (по умолчанию), `gigachat` - GigaChat API, `off` - без черновика |
