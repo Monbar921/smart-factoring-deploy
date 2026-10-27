@@ -72,9 +72,9 @@ services:
       LOG_LEVEL: ${ML_LOG_LEVEL:-INFO}
       # LLM для моделей - только через backend (GigaChat напрямую не вызывается)
       BACKEND_LLM_URL: http://backend:${BACKEND_PORT:-8080}/internal/rest/llm
-      # обученные модели (модуль с create()), пусто - эвристики
-      PD_MODEL_MODULE: ${PD_MODEL_MODULE:-}
-      DELAY_MODEL_MODULE: ${DELAY_MODEL_MODULE:-}
+      # модели: по умолчанию обученные pd-1.0 и delay-1.0 (модуль с create()), heuristic - эвристики сервиса
+      PD_MODEL_MODULE: ${PD_MODEL_MODULE:-app.models.pd_trained}
+      DELAY_MODEL_MODULE: ${DELAY_MODEL_MODULE:-app.models.delay_trained}
     cpus: ${ML_CPUS:-1}
     mem_limit: ${ML_MEM_LIMIT:-512m}
     # в python:slim нет curl/wget - проверка средствами python
