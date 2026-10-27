@@ -232,7 +232,7 @@ jobs:
           check KEYCLOAK_UI_CLIENT_ID '^[A-Za-z0-9._-]+$' "id клиента: латиница, цифры, . _ -"
           check LLM_MODE '^(stub|gigachat|off)$' "stub, gigachat или off"
           check LLM_PARALLELISM '^[1-9][0-9]{0,2}$' "число одновременных запросов: 1, 8"
-          check GIGACHAT_MODEL '^[A-Za-z0-9._:-]+$' "имя модели: GigaChat, GigaChat-2-Pro"
+          check GIGACHAT_MODEL '^[A-Za-z0-9._:-]+$' "имя модели: GigaChat-2, GigaChat-2-Pro"
           check GIGACHAT_SCOPE '^GIGACHAT_API_(PERS|B2B|CORP)$' "GIGACHAT_API_PERS, GIGACHAT_API_B2B или GIGACHAT_API_CORP"
           check GIGACHAT_AUTH_KEY '^[A-Za-z0-9+/=]+$' "ключ авторизации в Base64"
           # без ключа backend с LLM_MODE=gigachat не стартует - ловим до деплоя
@@ -288,7 +288,7 @@ jobs:
             echo "POSTGRES_DB='${POSTGRES_DB}'"
             echo "LLM_MODE=${LLM_MODE:-stub}"
             echo "LLM_PARALLELISM=${LLM_PARALLELISM:-8}"
-            echo "GIGACHAT_MODEL=${GIGACHAT_MODEL:-GigaChat}"
+            echo "GIGACHAT_MODEL=${GIGACHAT_MODEL:-GigaChat-2}"
             echo "GIGACHAT_SCOPE=${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}"
             echo "GIGACHAT_AUTH_KEY='${GIGACHAT_AUTH_KEY}'"
           } > deploy.env

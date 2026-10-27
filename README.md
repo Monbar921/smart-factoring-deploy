@@ -222,7 +222,7 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `KEYCLOAK_REALM` | `smart-factoring-test` | realm стенда, необязательно, по умолчанию `smart-factoring-<окружение>` |
 | Variable | `LLM_MODE` | `gigachat` | LLM backend: `stub` - шаблонные тексты (по умолчанию), `gigachat` - GigaChat API, `off` - без черновика |
 | Secret | `GIGACHAT_AUTH_KEY` | | ключ авторизации GigaChat API из личного кабинета (Base64), обязателен при `LLM_MODE=gigachat` |
-| Variable | `GIGACHAT_MODEL` | `GigaChat` | модель GigaChat: `GigaChat` (Lite, по умолчанию), `GigaChat-2-Pro`, `GigaChat-2-Max`, `GigaChat-3-Ultra`; доступные тарифу - `GET https://api.giga.chat/v1/models`, необязательно |
+| Variable | `GIGACHAT_MODEL` | `GigaChat-2` | модель GigaChat: `GigaChat-2` (базовая, по умолчанию), `GigaChat-2-Pro`, `GigaChat-2-Max`, `GigaChat-3-Lightning`, `GigaChat-3-Pro`, `GigaChat-3-Ultra`; доступные ключу - `GET /api/backend/llm/models` (Swagger), необязательно. Прежнего имени `GigaChat` на api.giga.chat нет |
 | Variable | `LLM_PARALLELISM` | `1` | одновременных запросов к GigaChat, не больше лимита тарифа (Freemium - 1), необязательно, по умолчанию 8 |
 | Variable | `GIGACHAT_SCOPE` | `GIGACHAT_API_PERS` | тариф GigaChat: `GIGACHAT_API_PERS`, `GIGACHAT_API_B2B` или `GIGACHAT_API_CORP`, необязательно |
 

@@ -43,8 +43,8 @@ services:
       LLM_MODE: ${LLM_MODE:-stub}
       # одновременных запросов к GigaChat, не больше лимита тарифа (Freemium - 1 поток)
       LLM_PARALLELISM: ${LLM_PARALLELISM:-8}
-      # поле model запроса: GigaChat (Lite), GigaChat-2-Pro, GigaChat-2-Max, GigaChat-3-Ultra
-      GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat}
+      # поле model запроса: GigaChat-2 (базовая), GigaChat-2-Pro, GigaChat-2-Max, GigaChat-3-Lightning, GigaChat-3-Pro, GigaChat-3-Ultra
+      GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat-2}
       # ключ авторизации GigaChat API (Base64 client_id:client_secret), нужен только при LLM_MODE=gigachat
       GIGACHAT_AUTH_KEY: ${GIGACHAT_AUTH_KEY:-}
       GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
