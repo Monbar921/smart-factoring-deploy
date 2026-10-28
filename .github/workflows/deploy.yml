@@ -223,6 +223,10 @@ jobs:
           GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL }}
           GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE }}
           GIGACHAT_AUTH_KEY: ${{ secrets.GIGACHAT_AUTH_KEY }}
+          GUEST_ENABLED: ${{ vars.GUEST_ENABLED }}
+          GUEST_USERNAME: ${{ vars.GUEST_USERNAME }}
+          GUEST_CLIENT_SECRET: ${{ secrets.GUEST_CLIENT_SECRET }}
+          GUEST_PASSWORD: ${{ secrets.GUEST_PASSWORD }}
         run: |
           # ошибки в переменных окружения ловим здесь, а не на VDS: число без единицы в mem_limit - это байты
           invalid=""
@@ -238,6 +242,11 @@ jobs:
           # без ключа backend с LLM_MODE=gigachat не стартует - ловим до деплоя
           if [ "$LLM_MODE" = "gigachat" ] && [ -z "$GIGACHAT_AUTH_KEY" ]; then
             invalid="$invalid LLM_MODE=gigachat без секрета GIGACHAT_AUTH_KEY;"
+          fi
+          check GUEST_ENABLED '^(true|false)$' "true или false"
+          # без секретов gateway не получит токен демо-пользователя - ловим до деплоя
+          if [ "$GUEST_ENABLED" = "true" ] && { [ -z "$GUEST_CLIENT_SECRET" ] || [ -z "$GUEST_PASSWORD" ]; }; then
+            invalid="$invalid GUEST_ENABLED=true без секретов GUEST_CLIENT_SECRET и GUEST_PASSWORD;"
           fi
           check ML_MODE '^(http|stub)$' "http или stub"
           check ML_WORKERS '^[1-9]$' "число процессов: 1-9"
@@ -291,6 +300,10 @@ jobs:
             echo "GIGACHAT_MODEL=${GIGACHAT_MODEL:-GigaChat-2}"
             echo "GIGACHAT_SCOPE=${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}"
             echo "GIGACHAT_AUTH_KEY='${GIGACHAT_AUTH_KEY}'"
+            echo "GUEST_ENABLED=${GUEST_ENABLED:-false}"
+            echo "GUEST_USERNAME=${GUEST_USERNAME:-demo}"
+            echo "GUEST_CLIENT_SECRET='${GUEST_CLIENT_SECRET}'"
+            echo "GUEST_PASSWORD='${GUEST_PASSWORD}'"
           } > deploy.env
 
       - name: Upload files

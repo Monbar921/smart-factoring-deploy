@@ -148,6 +148,27 @@ ssh -L 8180:127.0.0.1:<KEYCLOAK_PORT> deploy@<host>
 Затем http://localhost:8180/admin, логин `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`. Администратор создаётся
 только при первом старте keycloak на пустой базе.
 
+### Гостевой вход «Запуск демо»
+
+Кнопка «Запуск демо» на странице входа пускает без пароля. Токен демо-пользователя gateway получает у Keycloak сам
+(`POST /api/guest/session`), пароль и секрет клиента в браузер не попадают. Гостю даны все права оператора и менеджера:
+приложение проверяет комиссия.
+
+Включение на стенде:
+
+1. На VDS в каталоге infra один раз создать роли, клиент `smart-factoring-guest` и пользователя `demo`. Повторный
+   запуск только обновит секрет и пароль:
+   ```bash
+   KEYCLOAK_ADMIN=admin KEYCLOAK_ADMIN_PASSWORD=... REALM=smart-factoring-test GUEST_CLIENT_SECRET=... GUEST_PASSWORD=... sh keycloak/guest-setup.sh
+   ```
+2. В Environment стенда на GitHub:
+   - секреты `GUEST_CLIENT_SECRET` и `GUEST_PASSWORD` — те же значения;
+   - переменная `GUEST_ENABLED=true`;
+   - при необходимости `GUEST_USERNAME`, по умолчанию `demo`.
+3. Перезапустить deploy. Gateway и UI получат настройки, на странице входа появится кнопка.
+
+Выключение — `GUEST_ENABLED=false`: кнопки нет, `POST /api/guest/session` отвечает 404.
+
 ## GigaChat
 
 Backend получает тексты карточек от GigaChat API при `LLM_MODE=gigachat` (переменная окружения стенда) и ключе
@@ -222,6 +243,10 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `KEYCLOAK_REALM` | `smart-factoring-test` | realm стенда, необязательно, по умолчанию `smart-factoring-<окружение>` |
 | Variable | `LLM_MODE` | `gigachat` | LLM backend: `stub` - шаблонные тексты (по умолчанию), `gigachat` - GigaChat API, `off` - без черновика |
 | Secret | `GIGACHAT_AUTH_KEY` | | ключ авторизации GigaChat API из личного кабинета (Base64), обязателен при `LLM_MODE=gigachat` |
+| Variable | `GUEST_ENABLED` | `true` | гостевой вход «Запуск демо», по умолчанию `false`; см. «Гостевой вход» |
+| Variable | `GUEST_USERNAME` | `demo` | демо-пользователь realm, необязательно |
+| Secret | `GUEST_CLIENT_SECRET` | | секрет клиента `smart-factoring-guest`, обязателен при `GUEST_ENABLED=true` |
+| Secret | `GUEST_PASSWORD` | | пароль демо-пользователя, обязателен при `GUEST_ENABLED=true` |
 | Variable | `GIGACHAT_MODEL` | `GigaChat-2` | модель GigaChat: `GigaChat-2` (базовая, по умолчанию), `GigaChat-2-Pro`, `GigaChat-2-Max`, `GigaChat-3-Lightning`, `GigaChat-3-Pro`, `GigaChat-3-Ultra`; доступные ключу - `GET /api/backend/llm/models` (Swagger), необязательно. Прежнего имени `GigaChat` на api.giga.chat нет |
 | Variable | `LLM_PARALLELISM` | `1` | одновременных запросов к GigaChat, не больше лимита тарифа (Freemium - 1), необязательно, по умолчанию 8 |
 | Variable | `GIGACHAT_SCOPE` | `GIGACHAT_API_PERS` | тариф GigaChat: `GIGACHAT_API_PERS`, `GIGACHAT_API_B2B` или `GIGACHAT_API_CORP`, необязательно |
