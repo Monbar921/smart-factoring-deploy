@@ -219,6 +219,12 @@ jobs:
           ML_MEM_LIMIT: ${{ vars.ML_MEM_LIMIT }}
           ML_WORKERS: ${{ vars.ML_WORKERS }}
           LLM_MODE: ${{ vars.LLM_MODE }}
+          LLM_MASK: ${{ vars.LLM_MASK }}
+          ONPREM_LLM_URL: ${{ vars.ONPREM_LLM_URL }}
+          ONPREM_LLM_MODEL: ${{ vars.ONPREM_LLM_MODEL }}
+          ONPREM_LLM_API_KEY: ${{ secrets.ONPREM_LLM_API_KEY }}
+          MANAGER_SCOPE: ${{ vars.MANAGER_SCOPE }}
+          MANAGER_LOGINS: ${{ vars.MANAGER_LOGINS }}
           LLM_PARALLELISM: ${{ vars.LLM_PARALLELISM }}
           GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL }}
           GIGACHAT_SCOPE: ${{ vars.GIGACHAT_SCOPE }}
@@ -234,7 +240,12 @@ jobs:
           check KEYCLOAK_PUBLIC_URL '^https?://[^/[:space:]]+$' "адрес без пути и / на конце: http://203.0.113.10:8180"
           check KEYCLOAK_REALM '^[A-Za-z0-9._-]+$' "имя realm: латиница, цифры, . _ -"
           check KEYCLOAK_UI_CLIENT_ID '^[A-Za-z0-9._-]+$' "id клиента: латиница, цифры, . _ -"
-          check LLM_MODE '^(stub|gigachat|off)$' "stub, gigachat или off"
+          check LLM_MODE '^(stub|gigachat|onprem|off)$' "stub, gigachat, onprem или off"
+          check LLM_MASK '^(true|false)$' "true или false"
+          check ONPREM_LLM_URL '^https?://[^[:space:]]+$' "адрес API до /chat/completions: http://ollama:11434/v1"
+          check ONPREM_LLM_MODEL '^[A-Za-z0-9._:/-]+$' "имя модели на сервере: qwen2.5:7b-instruct, t-tech/T-lite-it-1.0"
+          check MANAGER_SCOPE '^(true|false)$' "true или false"
+          check MANAGER_LOGINS '^[^:,[:space:]]+:[A-Za-z0-9_-]+( *, *[^:,[:space:]]+:[A-Za-z0-9_-]+)*$' "логин:код менеджера через запятую: anna:M1,boris:M2"
           check LLM_PARALLELISM '^[1-9][0-9]{0,2}$' "число одновременных запросов: 1, 8"
           check GIGACHAT_MODEL '^[A-Za-z0-9._:-]+$' "имя модели: GigaChat-2, GigaChat-2-Pro"
           check GIGACHAT_SCOPE '^GIGACHAT_API_(PERS|B2B|CORP)$' "GIGACHAT_API_PERS, GIGACHAT_API_B2B или GIGACHAT_API_CORP"
@@ -242,6 +253,10 @@ jobs:
           # без ключа backend с LLM_MODE=gigachat не стартует - ловим до деплоя
           if [ "$LLM_MODE" = "gigachat" ] && [ -z "$GIGACHAT_AUTH_KEY" ]; then
             invalid="$invalid LLM_MODE=gigachat без секрета GIGACHAT_AUTH_KEY;"
+          fi
+          # без адреса и модели backend с LLM_MODE=onprem не стартует - ловим до деплоя
+          if [ "$LLM_MODE" = "onprem" ] && { [ -z "$ONPREM_LLM_URL" ] || [ -z "$ONPREM_LLM_MODEL" ]; }; then
+            invalid="$invalid LLM_MODE=onprem без переменных ONPREM_LLM_URL и ONPREM_LLM_MODEL;"
           fi
           check GUEST_ENABLED '^(true|false)$' "true или false"
           # без секретов gateway не получит токен демо-пользователя - ловим до деплоя
@@ -300,6 +315,12 @@ jobs:
             echo "GIGACHAT_MODEL=${GIGACHAT_MODEL:-GigaChat-2}"
             echo "GIGACHAT_SCOPE=${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}"
             echo "GIGACHAT_AUTH_KEY='${GIGACHAT_AUTH_KEY}'"
+            echo "LLM_MASK=${LLM_MASK:-true}"
+            echo "ONPREM_LLM_URL='${ONPREM_LLM_URL}'"
+            echo "ONPREM_LLM_MODEL='${ONPREM_LLM_MODEL}'"
+            echo "ONPREM_LLM_API_KEY='${ONPREM_LLM_API_KEY}'"
+            echo "MANAGER_SCOPE=${MANAGER_SCOPE:-true}"
+            echo "MANAGER_LOGINS='${MANAGER_LOGINS}'"
             echo "GUEST_ENABLED=${GUEST_ENABLED:-false}"
             echo "GUEST_USERNAME=${GUEST_USERNAME:-demo}"
             echo "GUEST_CLIENT_SECRET='${GUEST_CLIENT_SECRET}'"

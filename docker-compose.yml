@@ -39,8 +39,19 @@ services:
       # модели PD и задержки: http - сервис ml стенда, stub - встроенная заглушка backend
       ML_MODE: ${ML_MODE:-http}
       ML_BASE_URL: http://ml:8000
-      # LLM: stub - шаблонные тексты без LLM, gigachat - GigaChat API, off - без черновика сообщения клиенту
+      # LLM: stub - шаблонные тексты без LLM, gigachat - GigaChat API, onprem - LLM в контуре банка с API вида OpenAI
+      # (vLLM, Ollama), off - без черновика сообщения клиенту
       LLM_MODE: ${LLM_MODE:-stub}
+      # названия клиента и покупателя, ИНН, ОГРН и номер УПД уходят в LLM метками (backend Р-73); false - как есть
+      LLM_MASK: ${LLM_MASK:-true}
+      # LLM_MODE=onprem: адрес API до /chat/completions (http://ollama:11434/v1), модель на сервере и ключ, если нужен
+      ONPREM_LLM_URL: ${ONPREM_LLM_URL:-}
+      ONPREM_LLM_MODEL: ${ONPREM_LLM_MODEL:-}
+      ONPREM_LLM_API_KEY: ${ONPREM_LLM_API_KEY:-}
+      # карточку и предложения видит только менеджер клиента (backend Р-75): «логин:код менеджера» через запятую;
+      # роль supervisor и гостевой вход видят всех; MANAGER_SCOPE=false - проверка выключена
+      MANAGER_SCOPE: ${MANAGER_SCOPE:-true}
+      MANAGER_LOGINS: ${MANAGER_LOGINS:-}
       # одновременных запросов к GigaChat, не больше лимита тарифа (Freemium - 1 поток)
       LLM_PARALLELISM: ${LLM_PARALLELISM:-8}
       # поле model запроса: GigaChat-2 (базовая), GigaChat-2-Pro, GigaChat-2-Max, GigaChat-3-Lightning, GigaChat-3-Pro, GigaChat-3-Ultra
@@ -52,6 +63,9 @@ services:
       GIGACHAT_CA_CERT: /certs/russian_trusted_root_ca.pem
     volumes:
       - ./certs:/certs:ro
+    # сервер моделей на самом VDS (LLM_MODE=onprem): ONPREM_LLM_URL=http://host.docker.internal:11434/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # куча JVM - 75% от mem_limit (MaxRAMPercentage), число потоков GC/пулов JVM считает от cpus
     cpus: ${BACKEND_CPUS:-1}
     mem_limit: ${BACKEND_MEM_LIMIT:-1g}

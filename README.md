@@ -169,6 +169,23 @@ ssh -L 8180:127.0.0.1:<KEYCLOAK_PORT> deploy@<host>
 
 Выключение — `GUEST_ENABLED=false`: кнопки нет, `POST /api/guest/session` отвечает 404.
 
+## Доступ менеджеров
+
+Backend отдаёт менеджеру только его клиентов и предложения (`MANAGER_SCOPE=true`, по умолчанию). Перед выкатом:
+
+1. В Keycloak realm стенда создать роль `supervisor` и выдать её тем, кто должен видеть всех менеджеров (команда,
+   руководитель). Без неё пользователь только с ролью `manager` и без строки в `MANAGER_LOGINS` увидит пустой список.
+2. Менеджерам - переменная `MANAGER_LOGINS`: `логин:код` через запятую, код - из `managers.csv` (в демо-данных `M1`).
+
+Гостевой вход «Запуск демо» видит всех менеджеров, как и раньше.
+
+## LLM в контуре
+
+`LLM_MODE=onprem` - backend ходит в сервер моделей с API вида OpenAI (vLLM, Ollama, llama.cpp, LM Studio) по
+`ONPREM_LLM_URL` с моделью `ONPREM_LLM_MODEL`. Без них deploy с `LLM_MODE=onprem` останавливается до изменений на VDS.
+Сервер моделей поднимается отдельно: в сети стенда или на самом VDS - тогда
+`ONPREM_LLM_URL=http://host.docker.internal:11434/v1` (Ollama; адрес хоста backend видит через `extra_hosts`).
+
 ## GigaChat
 
 Backend получает тексты карточек от GigaChat API при `LLM_MODE=gigachat` (переменная окружения стенда) и ключе
@@ -241,8 +258,14 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `ML_WORKERS` | `1` | процессов uvicorn ml, не больше `ML_CPUS`, необязательно |
 | Variable | `KEYCLOAK_UI_CLIENT_ID` | `smart-factoring-ui` | клиент UI в realm стенда, необязательно, по умолчанию `smart-factoring-ui` |
 | Variable | `KEYCLOAK_REALM` | `smart-factoring-test` | realm стенда, необязательно, по умолчанию `smart-factoring-<окружение>` |
-| Variable | `LLM_MODE` | `gigachat` | LLM backend: `stub` - шаблонные тексты (по умолчанию), `gigachat` - GigaChat API, `off` - без черновика |
+| Variable | `LLM_MODE` | `gigachat` | LLM backend: `stub` - шаблонные тексты (по умолчанию), `gigachat` - GigaChat API, `onprem` - LLM в контуре с API вида OpenAI, `off` - без черновика |
 | Secret | `GIGACHAT_AUTH_KEY` | | ключ авторизации GigaChat API из личного кабинета (Base64), обязателен при `LLM_MODE=gigachat` |
+| Variable | `LLM_MASK` | `true` | названия, ИНН, ОГРН и номер УПД уходят в LLM метками, по умолчанию `true`; `false` - как есть (только для LLM в контуре) |
+| Variable | `ONPREM_LLM_URL` | `http://ollama:11434/v1` | адрес API до `/chat/completions`, обязателен при `LLM_MODE=onprem` |
+| Variable | `ONPREM_LLM_MODEL` | `qwen2.5:7b-instruct` | модель на сервере (`GET /models`), обязательна при `LLM_MODE=onprem` |
+| Secret | `ONPREM_LLM_API_KEY` | | ключ сервера моделей, если он его требует, необязательно |
+| Variable | `MANAGER_SCOPE` | `true` | менеджер видит только своих клиентов (НФР-9), по умолчанию `true`; `false` - все видят всех |
+| Variable | `MANAGER_LOGINS` | `anna:M1,boris:M2` | логин Keycloak и код менеджера из `managers.csv` через запятую; роль `supervisor` и гость видят всех; см. «Доступ менеджеров» |
 | Variable | `GUEST_ENABLED` | `true` | гостевой вход «Запуск демо», по умолчанию `false`; см. «Гостевой вход» |
 | Variable | `GUEST_USERNAME` | `demo` | демо-пользователь realm, необязательно |
 | Secret | `GUEST_CLIENT_SECRET` | | секрет клиента `smart-factoring-guest`, обязателен при `GUEST_ENABLED=true` |
