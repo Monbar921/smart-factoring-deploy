@@ -236,7 +236,7 @@ Backend отдаёт менеджеру только его клиентов и 
 цифры, не совпадает с логином и почтой, не повторяет 3 последних) и одноразовый код (OTP, приложение-аутентификатор)
 при входе через браузер для ролей `operator` и `supervisor` и для администратора Keycloak. Роль `otp-required` входит
 в `operator` и `supervisor`, поэтому новые пользователи с этими ролями получают OTP сами. Вход без браузера (гостевой
-вход «Запуск демо» через gateway, `kcadm`) не меняется. Проверено на Keycloak 26.8.1 локально 21.11.2026.
+вход «Запуск демо» через gateway, `kcadm`) не меняется. Проверено на Keycloak 26.8.1 и 26.8.2 локально 21.11.2026.
 
 1. После `guest-setup.sh` (нужны роли), на VDS в каталоге infra:
    ```sh
@@ -253,6 +253,19 @@ Backend отдаёт менеджеру только его клиентов и 
 
 Откат: админка → realm → Authentication → для browser flow выбрать `browser` (Bind flow); политика - Realm settings →
 Policies → Password policy.
+
+## Проверка безопасности
+
+Подробно и с разбором находок - smart-factoring-backend `docs/security.md`, «Проверка безопасности перед запуском».
+
+- [security-scan.yml](.github/workflows/security-scan.yml) (как и в репозиториях сервисов): Semgrep по workflow и
+  скриптам и Trivy по сторонним образам из compose (postgres, keycloak, caddy) - на каждый push, pull request и раз в
+  неделю. Образы закреплены дайджестом: обновление - новый тег и дайджест в `infra/docker-compose.yml`
+  (`docker pull <образ>:<тег>`, затем `docker image inspect --format '{{index .RepoDigests 0}}'`). Принятые находки -
+  `.trivyignore` со сроком.
+- [zap-baseline.yml](.github/workflows/zap-baseline.yml): OWASP ZAP baseline по UI стенда - пассивная проверка, данные
+  не меняет. Запуск - Actions → ZAP baseline → Run workflow (адрес - параметр) или раз в неделю по переменной
+  репозитория `ZAP_TARGET` (`https://app.<TLS_DOMAIN>`). Отчёт - артефакт `zap-report`.
 
 ## LLM в контуре
 

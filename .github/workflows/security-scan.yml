@@ -1,0 +1,61 @@
+name: Security scan
+
+# Проверка безопасности перед выкатом (smart-factoring-backend: docs/security.md, «Проверка безопасности»; дорожная
+# карта, п. 1.1а-33). Каждый push и pull request и раз в неделю (новые уязвимости появляются и в неизменённом коде):
+#   sast  - статический анализ кода Semgrep (правила p/default: Java, TypeScript, Python, Dockerfile, workflow);
+#           красная проверка - находка уровня ERROR; WARNING - в отчёте, разобраны в docs/security.md
+#   images - сторонние образы из compose (postgres, keycloak, caddy): своих образов здесь нет,
+#           образы сервисов проверяют их репозитории
+# Красная проверка - исправить (обновить зависимость или базовый образ) или принять с обоснованием: строка в
+# .trivyignore со сроком и запись в docs/security.md; nosemgrep в коде - только с причиной рядом.
+# Сканеры - образами Docker, закреплёнными дайджестом, без сторонних actions: плавающий тег чужого action могут подменить.
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.65.0@sha256:a22415a38938a56c379387a8163fcb0ce38b10ace73e593475d3658d578b2436
+  SEMGREP_IMAGE: semgrep/semgrep:1.130.0@sha256:7674a72a8bd5beaa4591b728e5950c04c58b27b82803901f36e7f9d70b828906
+
+jobs:
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Semgrep - отчёт
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src "$SEMGREP_IMAGE"             semgrep scan --config p/default --metrics=off --exclude-rule yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag             --severity WARNING --severity ERROR --text | tee semgrep.txt
+          { echo '### Semgrep'; echo '```'; cat semgrep.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Semgrep - находки уровня ERROR
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src "$SEMGREP_IMAGE"             semgrep scan --config p/default --metrics=off --severity ERROR --error --quiet
+
+  images:
+    name: Third-party images (Trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # gosu в образе postgres - смена пользователя при старте контейнера: собран старым Go, но сеть, TLS и разбор
+      # данных не использует, находки по стандартной библиотеке Go к нему неприменимы (docs/security.md, «Принятые находки»)
+      - name: Trivy - образы из compose
+        run: |
+          mkdir -p "$HOME/.cache/trivy"
+          failed=0
+          for image in $(grep -h 'image:' docker-compose.yml infra/docker-compose.yml | grep -v 'ghcr.io' | sed 's/.*image: *//'); do
+            echo "::group::$image"
+            docker run --rm -v "$GITHUB_WORKSPACE:/repo" -v "$HOME/.cache/trivy:/root/.cache/trivy" -w /repo "$TRIVY_IMAGE"               image "$image" --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore               --skip-files usr/local/bin/gosu --exit-code 1 --no-progress || failed=1
+            echo "::endgroup::"
+          done
+          exit $failed

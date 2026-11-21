@@ -1,0 +1,59 @@
+name: ZAP baseline
+
+# Динамическая проверка стенда (smart-factoring-backend: docs/security.md, «Проверка безопасности перед запуском»;
+# дорожная карта, п. 1.1а-33): OWASP ZAP baseline - паук по страницам и пассивные проверки ответов (заголовки,
+# cookie, утечки в ответах). Атак не выполняет, данные не меняет: можно запускать по работающему стенду.
+# Адрес - входной параметр или переменная ZAP_TARGET (https://app.<TLS_DOMAIN>). Красная проверка - правило уровня FAIL;
+# предупреждения (WARN) - в отчёте (артефакт zap-report), разобраны в docs/security.md.
+# Раз в неделю - по ZAP_TARGET, если он задан.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Адрес UI стенда (по умолчанию - переменная ZAP_TARGET)
+        required: false
+  schedule:
+    - cron: "0 4 * * 1"
+
+permissions:
+  contents: read
+
+env:
+  ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:2.16.1@sha256:7840969c7c9fead565bf9734b12f49f6886db90b1d35b1f74d79710bbd081dab
+
+jobs:
+  baseline:
+    name: ZAP baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Адрес стенда
+        id: target
+        env:
+          INPUT_TARGET: ${{ inputs.target }}
+          VAR_TARGET: ${{ vars.ZAP_TARGET }}
+        run: |
+          target="${INPUT_TARGET:-$VAR_TARGET}"
+          if [ -z "$target" ]; then
+            echo "::notice::Не задан ни параметр target, ни переменная ZAP_TARGET - проверять нечего"
+          fi
+          echo "url=$target" >> "$GITHUB_OUTPUT"
+
+      - name: ZAP baseline
+        if: steps.target.outputs.url != ''
+        env:
+          TARGET: ${{ steps.target.outputs.url }}
+        run: |
+          mkdir -p zap && chmod 777 zap
+          # -I: предупреждения не валят проверку, только FAIL; -j: AJAX-паук для SPA (страницы рисует React)
+          docker run --rm -v "$PWD/zap:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-baseline.py -t "$TARGET" -j -I -r report.html -J report.json -w report.md
+          cat zap/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Отчёт
+        if: always() && steps.target.outputs.url != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: zap-report
+          path: zap/
+          retention-days: 30

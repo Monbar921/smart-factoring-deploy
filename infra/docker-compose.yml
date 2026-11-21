@@ -16,7 +16,7 @@ x-logging: &logging
 
 services:
   postgres:
-    image: postgres:17.6-alpine
+    image: postgres:17.12-alpine@sha256:526f86d93c6ea08fd3f1fe5605650cacc781b2c6013169a0ad8f42c7d3d84f32
     restart: unless-stopped
     logging: *logging
     environment:
@@ -39,8 +39,8 @@ services:
 
   keycloak:
     # с Docker Hub, а не quay.io: CDN quay.io с VDS отдаёт слои с таймаутами.
-    # Тот же образ, что quay.io/keycloak/keycloak:26.8.1 - дайджест совпадает, закреплён им
-    image: keycloak/keycloak:26.8.1@sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244
+    # тот же образ публикуется в quay.io/keycloak/keycloak; закреплён дайджестом (обновление - security-scan.yml, Trivy)
+    image: keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
     restart: unless-stopped
     logging: *logging
     # --import-realm: realm-файлы из ./keycloak/realms импортируются, только если такого realm ещё нет
@@ -100,7 +100,7 @@ services:
   # TLS на входе VDS (п. 1.1-5): https://app|api|auth.<TLS_DOMAIN>, сертификаты Let's Encrypt. Запускается, только если
   # задан TLS_DOMAIN (infra.yml пишет COMPOSE_PROFILES=tls в .env). UI и gateway стендов - по сети smart-factoring-edge
   proxy:
-    image: caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb
+    image: caddy:2.11.9@sha256:4851e54a46b206517c574821bb5cc67f170d2156041e9fbc4c9193b45e84a75b
     restart: unless-stopped
     logging: *logging
     profiles: [ "tls" ]
