@@ -157,10 +157,14 @@ ssh -L 8180:127.0.0.1:<KEYCLOAK_PORT> deploy@<host>
 Включение на стенде:
 
 1. На VDS в каталоге infra один раз создать роли, клиент `smart-factoring-guest` и пользователя `demo`. Повторный
-   запуск только обновит секрет и пароль:
+   запуск только обновит секрет и пароль. Значения уже есть в `.env` infra (`KEYCLOAK_ADMIN*`) и в `.env` стенда
+   (`GUEST_*`, `KEYCLOAK_REALM`), вводить их не нужно:
    ```bash
-   KEYCLOAK_ADMIN=admin KEYCLOAK_ADMIN_PASSWORD=... REALM=smart-factoring-test GUEST_CLIENT_SECRET=... GUEST_PASSWORD=... sh keycloak/guest-setup.sh
+   cd <VDS_INFRA_DIR>
+   set -a; . ./.env; . <VDS_DIR стенда>/.env; set +a
+   REALM="$KEYCLOAK_REALM" sh keycloak/guest-setup.sh
    ```
+   `COMPOSE_PROJECT_NAME` из `.env` стенда скрипт не учитывает: Keycloak - в проекте `smart-factoring-infra`.
 2. В Environment стенда на GitHub:
    - секреты `GUEST_CLIENT_SECRET` и `GUEST_PASSWORD` — те же значения;
    - переменная `GUEST_ENABLED=true`;

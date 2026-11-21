@@ -3,8 +3,10 @@
 # и демо-пользователь с обеими ролями в realm стенда. Повторный запуск ничего не дублирует: секрет клиента и пароль
 # пользователя обновляются.
 #
-# Запуск на VDS в каталоге infra (рядом с infra/docker-compose.yml):
-#   KEYCLOAK_ADMIN=admin KEYCLOAK_ADMIN_PASSWORD=... REALM=smart-factoring-test \
+# Запуск на VDS в каталоге infra (рядом с infra/docker-compose.yml), значения - из .env infra и .env стенда:
+#   set -a; . ./.env; . <каталог стенда>/.env; set +a
+#   REALM="$KEYCLOAK_REALM" sh keycloak/guest-setup.sh
+# или явно: KEYCLOAK_ADMIN=admin KEYCLOAK_ADMIN_PASSWORD=... REALM=smart-factoring-test \
 #   GUEST_CLIENT_SECRET=... GUEST_PASSWORD=... sh keycloak/guest-setup.sh
 # Те же GUEST_CLIENT_SECRET и GUEST_PASSWORD - в секретах окружения GitHub (deploy.yml), GUEST_ENABLED=true - в переменных.
 set -eu
@@ -18,8 +20,10 @@ GUEST_CLIENT_ID="${GUEST_CLIENT_ID:-smart-factoring-guest}"
 GUEST_USERNAME="${GUEST_USERNAME:-demo}"
 GUEST_EMAIL="${GUEST_EMAIL:-${GUEST_USERNAME}@smart-factoring.local}"
 
+# проект compose - из name: в infra/docker-compose.yml; COMPOSE_PROJECT_NAME из .env стенда (smart-factoring-test)
+# перекрыл бы его, и keycloak искался бы среди сервисов стенда («service "keycloak" is not running»)
 kcadm() {
-  docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"
+  env -u COMPOSE_PROJECT_NAME docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"
 }
 
 kcadm config credentials --server http://localhost:8080 --realm master --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null
