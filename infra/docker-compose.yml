@@ -54,6 +54,8 @@ services:
       # админка - только через ssh-туннель: ssh -L 8180:127.0.0.1:<KEYCLOAK_PORT> ..., затем http://localhost:8180/admin
       KC_HOSTNAME_ADMIN: ${KEYCLOAK_ADMIN_URL:-http://localhost:8180}
       KC_HTTP_ENABLED: "true"
+      # за TLS-прокси (сервис proxy, TLS_DOMAIN): схема и адрес клиента - из X-Forwarded-*
+      KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
       # подставляются в ${...} realm-файлов при импорте
       KEYCLOAK_TEST_USER: ${KEYCLOAK_TEST_USER:?KEYCLOAK_TEST_USER is required}
@@ -62,14 +64,16 @@ services:
       KEYCLOAK_TEST_UI_URL: ${KEYCLOAK_TEST_UI_URL:?KEYCLOAK_TEST_UI_URL is required}
     volumes:
       - ./keycloak/realms:/opt/keycloak/data/import:ro
-    # страница логина открывается в браузере - порт публичный
+    # страница логина открывается в браузере - порт публичный. С TLS вход идёт через https://auth.<TLS_DOMAIN>,
+    # тогда KEYCLOAK_BIND=127.0.0.1: порт остаётся только для админки через ssh-туннель
     ports:
-      - "${KEYCLOAK_PORT:-8180}:8080"
+      - "${KEYCLOAK_BIND:-0.0.0.0}:${KEYCLOAK_PORT:-8180}:8080"
     cpus: ${KEYCLOAK_CPUS:-1}
     mem_limit: ${KEYCLOAK_MEM_LIMIT:-1g}
     networks:
       - default
       - auth
+      - edge
     # в образе нет curl/wget: запрос к /health/ready на management-порту 9000 средствами bash.
     # Смотрим код ответа, а не тело: в теле "UP" есть и у отдельных проверок, пока общий статус ещё DOWN (503)
     healthcheck:
@@ -83,13 +87,44 @@ services:
       start_period: 120s
       retries: 12
 
+  # TLS на входе VDS (п. 1.1-5): https://app|api|auth.<TLS_DOMAIN>, сертификаты Let's Encrypt. Запускается, только если
+  # задан TLS_DOMAIN (infra.yml пишет COMPOSE_PROFILES=tls в .env). UI и gateway стендов - по сети smart-factoring-edge
+  proxy:
+    image: caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb
+    restart: unless-stopped
+    profiles: [ "tls" ]
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    environment:
+      TLS_DOMAIN: ${TLS_DOMAIN:-}
+      TLS_STAND: ${TLS_STAND:-smart-factoring-test}
+      UI_PORT: ${UI_PORT:-8070}
+      GATEWAY_PORT: ${GATEWAY_PORT:-8090}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - edge
+    cpus: ${PROXY_CPUS:-0.25}
+    mem_limit: ${PROXY_MEM_LIMIT:-128m}
+
 networks:
   # фиксированные имена без префикса проекта: по ним сети находят стенды
   default:
     name: smart-factoring-db
   auth:
     name: smart-factoring-auth
+  # TLS-прокси ↔ UI и gateway стендов, Keycloak
+  edge:
+    name: smart-factoring-edge
 
 volumes:
+  caddy-data:
+  caddy-config:
   postgres-data:
     name: smart-factoring-postgres-data

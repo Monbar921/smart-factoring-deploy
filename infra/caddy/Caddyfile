@@ -1,0 +1,34 @@
+# TLS на входе VDS (smart-factoring-backend docs/roadmap.md, п. 1.1-5): Caddy сам получает и продлевает сертификаты
+# Let's Encrypt для трёх имён в домене TLS_DOMAIN и проксирует их по сети smart-factoring-edge:
+#   app.<домен>  - UI стенда TLS_STAND (nginx UI сам проксирует /api в gateway своего стенда)
+#   api.<домен>  - gateway стенда TLS_STAND: Swagger UI и API для интеграций
+#   auth.<домен> - Keycloak: страницы входа; админка снаружи закрыта, только через ssh-туннель
+# Порты 80 (проверка домена Let's Encrypt и редирект на https) и 443 должны быть открыты на VDS.
+# Сертификаты хранятся в volume caddy-data: пересоздание контейнера не запрашивает их заново.
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+app.{$TLS_DOMAIN} {
+	import security_headers
+	reverse_proxy {$TLS_STAND}-ui-1:{$UI_PORT}
+}
+
+api.{$TLS_DOMAIN} {
+	import security_headers
+	reverse_proxy {$TLS_STAND}-gateway-1:{$GATEWAY_PORT}
+}
+
+auth.{$TLS_DOMAIN} {
+	import security_headers
+	# админка Keycloak - только через ssh-туннель на 127.0.0.1:KEYCLOAK_PORT (README, раздел Keycloak)
+	@admin path /admin /admin/* /realms/master /realms/master/*
+	respond @admin 404
+	reverse_proxy keycloak:8080
+}

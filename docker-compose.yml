@@ -127,9 +127,11 @@ services:
     networks:
       - default
       - auth
-    # gateway слушает тот же порт, что и публикуется на VDS
+      - edge
+    # gateway слушает тот же порт, что и публикуется на VDS. С TLS (https://api.<TLS_DOMAIN>, infra) -
+    # GATEWAY_BIND=127.0.0.1: снаружи только https
     ports:
-      - "${GATEWAY_PORT:-8090}:${GATEWAY_PORT:-8090}"
+      - "${GATEWAY_BIND:-0.0.0.0}:${GATEWAY_PORT:-8090}:${GATEWAY_PORT:-8090}"
     cpus: ${GATEWAY_CPUS:-0.5}
     mem_limit: ${GATEWAY_MEM_LIMIT:-512m}
     healthcheck:
@@ -156,8 +158,12 @@ services:
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_UI_CLIENT_ID:-smart-factoring-ui}
       # кнопка «Запуск демо» на странице входа - вместе с гостевым входом gateway
       GUEST_LOGIN: ${GUEST_ENABLED:-false}
+    # TLS-прокси infra ходит в UI по сети smart-factoring-edge; с TLS - UI_BIND=127.0.0.1: снаружи только https
+    networks:
+      - default
+      - edge
     ports:
-      - "${UI_PORT:-8070}:${UI_PORT:-8070}"
+      - "${UI_BIND:-0.0.0.0}:${UI_PORT:-8070}:${UI_PORT:-8070}"
     cpus: ${UI_CPUS:-0.25}
     mem_limit: ${UI_MEM_LIMIT:-128m}
     # localhost в alpine - сначала ::1, а nginx слушает только IPv4
@@ -176,3 +182,6 @@ networks:
   auth:
     external: true
     name: smart-factoring-auth
+  edge:
+    external: true
+    name: smart-factoring-edge

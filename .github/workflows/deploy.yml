@@ -181,7 +181,7 @@ jobs:
 
       - name: Check infra is deployed
         run: |
-          for network in smart-factoring-db smart-factoring-auth; do
+          for network in smart-factoring-db smart-factoring-auth smart-factoring-edge; do
             if ! ssh vds "docker network inspect $network > /dev/null 2>&1"; then
               echo "::error::На VDS нет сети $network: сначала раскатите общую инфраструктуру (Actions → Infra → Run workflow)"
               exit 1
@@ -211,6 +211,8 @@ jobs:
           GATEWAY_CPUS: ${{ vars.GATEWAY_CPUS }}
           GATEWAY_MEM_LIMIT: ${{ vars.GATEWAY_MEM_LIMIT }}
           UI_PORT: ${{ vars.UI_PORT }}
+          UI_BIND: ${{ vars.UI_BIND }}
+          GATEWAY_BIND: ${{ vars.GATEWAY_BIND }}
           UI_CPUS: ${{ vars.UI_CPUS }}
           UI_MEM_LIMIT: ${{ vars.UI_MEM_LIMIT }}
           KEYCLOAK_UI_CLIENT_ID: ${{ vars.KEYCLOAK_UI_CLIENT_ID }}
@@ -273,6 +275,9 @@ jobs:
           for name in BACKEND_CPUS GATEWAY_CPUS UI_CPUS ML_CPUS; do
             check "$name" '^[0-9]+(\.[0-9]+)?$' "число ядер: 1, 0.5"
           done
+          for name in UI_BIND GATEWAY_BIND; do
+            check "$name" '^(0\.0\.0\.0|127\.0\.0\.1)$' "0.0.0.0 - порт открыт наружу, 127.0.0.1 - только через TLS-прокси"
+          done
           for name in BACKEND_PORT GATEWAY_PORT UI_PORT; do
             check "$name" '^([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$' "порт 1-65535"
           done
@@ -294,6 +299,8 @@ jobs:
             echo "GATEWAY_MEM_LIMIT=${GATEWAY_MEM_LIMIT:-512m}"
             echo "UI_TAG=${UI_TAG}"
             echo "UI_PORT=${UI_PORT:-8070}"
+            echo "UI_BIND=${UI_BIND:-0.0.0.0}"
+            echo "GATEWAY_BIND=${GATEWAY_BIND:-0.0.0.0}"
             echo "UI_CPUS=${UI_CPUS:-0.25}"
             echo "UI_MEM_LIMIT=${UI_MEM_LIMIT:-128m}"
             echo "ML_TAG=${ML_TAG}"

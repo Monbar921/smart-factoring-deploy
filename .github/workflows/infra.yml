@@ -101,6 +101,10 @@ jobs:
           # порты gateway и UI стенда test: из них по умолчанию строятся redirect URI Swagger UI и UI в realm test
           GATEWAY_PORT: ${{ vars.GATEWAY_PORT }}
           UI_PORT: ${{ vars.UI_PORT }}
+          # TLS на входе VDS (п. 1.1-5): домен, для которого Caddy получит сертификаты app|api|auth.<домен>, и стенд за ним
+          TLS_DOMAIN: ${{ vars.TLS_DOMAIN }}
+          TLS_STAND: ${{ vars.TLS_STAND }}
+          KEYCLOAK_BIND: ${{ vars.KEYCLOAK_BIND }}
         run: |
           invalid=""
           check() { [ -z "${!1}" ] || [[ "${!1}" =~ $2 ]] || invalid="$invalid $1='${!1}' ($3);"; }
@@ -117,6 +121,9 @@ jobs:
           for name in KEYCLOAK_PUBLIC_URL KEYCLOAK_TEST_GATEWAY_URL KEYCLOAK_TEST_UI_URL; do
             check "$name" '^https?://[^/[:space:]]+$' "адрес без пути и / на конце: http://203.0.113.10:8180"
           done
+          check TLS_DOMAIN '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$' "домен без схемы и порта: stand.example.ru или 203-0-113-10.sslip.io"
+          check TLS_STAND '^[a-z0-9][a-z0-9_-]*$' "имя проекта compose стенда: smart-factoring-test"
+          check KEYCLOAK_BIND '^(0\.0\.0\.0|127\.0\.0\.1)$' "0.0.0.0 - порт открыт наружу, 127.0.0.1 - только ssh-туннель"
           # логин подставляется в realm-файл (JSON) как есть
           check KEYCLOAK_TEST_USER '^[A-Za-z0-9._-]+$' "латиница, цифры, . _ -"
           # имя роли postgres: без кавычек в SQL - только строчная латиница, цифры и _
@@ -134,9 +141,16 @@ jobs:
           fi
 
           host="$(printf '%s' "$VDS_HOST" | tr -d '[:space:]')"
-          keycloak_public_url="${KEYCLOAK_PUBLIC_URL:-http://${host}:${KEYCLOAK_PORT:-8180}}"
-          test_gateway_url="${KEYCLOAK_TEST_GATEWAY_URL:-http://${host}:${GATEWAY_PORT:-8090}}"
-          test_ui_url="${KEYCLOAK_TEST_UI_URL:-http://${host}:${UI_PORT:-8070}}"
+          if [ -n "$TLS_DOMAIN" ]; then
+            # с TLS адреса по умолчанию - https-имена прокси
+            keycloak_public_url="${KEYCLOAK_PUBLIC_URL:-https://auth.${TLS_DOMAIN}}"
+            test_gateway_url="${KEYCLOAK_TEST_GATEWAY_URL:-https://api.${TLS_DOMAIN}}"
+            test_ui_url="${KEYCLOAK_TEST_UI_URL:-https://app.${TLS_DOMAIN}}"
+          else
+            keycloak_public_url="${KEYCLOAK_PUBLIC_URL:-http://${host}:${KEYCLOAK_PORT:-8180}}"
+            test_gateway_url="${KEYCLOAK_TEST_GATEWAY_URL:-http://${host}:${GATEWAY_PORT:-8090}}"
+            test_ui_url="${KEYCLOAK_TEST_UI_URL:-http://${host}:${UI_PORT:-8070}}"
+          fi
           echo "Keycloak: ${keycloak_public_url}, redirect Swagger UI test: ${test_gateway_url}, redirect UI test: ${test_ui_url}" >> "$GITHUB_STEP_SUMMARY"
 
           umask 077
@@ -158,6 +172,13 @@ jobs:
             echo "KEYCLOAK_TEST_USER_PASSWORD='${KEYCLOAK_TEST_USER_PASSWORD}'"
             echo "KEYCLOAK_TEST_GATEWAY_URL=${test_gateway_url}"
             echo "KEYCLOAK_TEST_UI_URL=${test_ui_url}"
+            echo "KEYCLOAK_BIND=${KEYCLOAK_BIND:-0.0.0.0}"
+            # TLS-прокси: сервис proxy запускается профилем tls, только с доменом
+            echo "TLS_DOMAIN=${TLS_DOMAIN}"
+            echo "TLS_STAND=${TLS_STAND:-smart-factoring-test}"
+            echo "UI_PORT=${UI_PORT:-8070}"
+            echo "GATEWAY_PORT=${GATEWAY_PORT:-8090}"
+            if [ -n "$TLS_DOMAIN" ]; then echo "COMPOSE_PROFILES=tls"; fi
           } > infra.env
 
       - name: Upload files
@@ -167,6 +188,8 @@ jobs:
           # realm-файлы и скрипты keycloak: только актуальные, удалённый из репозитория не должен остаться на VDS
           ssh vds "rm -rf '$INFRA_DIR/keycloak' && mkdir -p '$INFRA_DIR/keycloak'"
           scp -r infra/keycloak/. vds:"$INFRA_DIR/keycloak/"
+          ssh vds "rm -rf '$INFRA_DIR/caddy' && mkdir -p '$INFRA_DIR/caddy'"
+          scp -r infra/caddy/. vds:"$INFRA_DIR/caddy/"
           scp infra.env vds:"$INFRA_DIR/.env"
           ssh vds "chmod 600 '$INFRA_DIR/.env'"
 
@@ -193,3 +216,4 @@ jobs:
           ssh vds "cd '$INFRA_DIR' && docker compose ps" || true
           ssh vds "cd '$INFRA_DIR' && docker compose logs --tail 50 postgres" || true
           ssh vds "cd '$INFRA_DIR' && docker compose logs --tail 100 keycloak" || true
+          ssh vds "cd '$INFRA_DIR' && docker compose logs --tail 50 proxy" 2>/dev/null || true

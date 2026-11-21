@@ -173,6 +173,49 @@ ssh -L 8180:127.0.0.1:<KEYCLOAK_PORT> deploy@<host>
 
 Выключение — `GUEST_ENABLED=false`: кнопки нет, `POST /api/guest/session` отвечает 404.
 
+## HTTPS
+
+TLS на входе VDS - сервис `proxy` (Caddy) в infra: сам получает и продлевает сертификаты Let's Encrypt и отдаёт
+три имени в домене `TLS_DOMAIN`:
+
+| Адрес | Куда |
+|---|---|
+| `https://app.<TLS_DOMAIN>` | UI стенда `TLS_STAND` (по умолчанию `smart-factoring-test`), `/api` - в его gateway |
+| `https://api.<TLS_DOMAIN>` | gateway стенда: Swagger UI, API для интеграций |
+| `https://auth.<TLS_DOMAIN>` | Keycloak: вход пользователей. Админка и realm master снаружи закрыты - только ssh-туннель |
+
+Прокси ходит в UI и gateway стенда по сети `smart-factoring-edge` (создаёт infra), поэтому их порты на VDS можно
+закрыть. Без `TLS_DOMAIN` прокси не запускается, стенд работает по HTTP, как раньше.
+
+Домен - любой из двух:
+
+- **свой домен**: DNS-записи A `app`, `api`, `auth` → IP VDS, `TLS_DOMAIN=stand.example.ru`;
+- **без покупки**: `TLS_DOMAIN=203-0-113-10.sslip.io` - IP VDS через дефисы. sslip.io отвечает на любое имя вида
+  `*.203-0-113-10.sslip.io` адресом 203.0.113.10, настраивать DNS не нужно.
+
+Включение (один раз):
+
+1. На VDS открыть порты 80 (проверка домена Let's Encrypt, редирект на https) и 443.
+2. Environment `test` на GitHub: переменная `TLS_DOMAIN`. Если `KEYCLOAK_PUBLIC_URL`, `KEYCLOAK_TEST_UI_URL`,
+   `KEYCLOAK_TEST_GATEWAY_URL` заданы явно - заменить на `https://auth.<домен>`, `https://app.<домен>`,
+   `https://api.<домен>` или удалить (с `TLS_DOMAIN` это значения по умолчанию в Infra).
+3. Actions → Infra → Run workflow: стартует `proxy`, keycloak пересоздаётся с `KC_PROXY_HEADERS`. Первые
+   сертификаты - до минуты, ход - в логе proxy в шаге Status.
+4. На VDS в каталоге infra - адреса https в клиентах уже импортированного realm и `sslRequired=external`:
+   ```bash
+   set -a; . ./.env; set +a
+   REALM=smart-factoring-test OLD_UI_URL=http://<VDS>:8070 OLD_GATEWAY_URL=http://<VDS>:8090 sh keycloak/https-setup.sh
+   ```
+5. Environment `test`: `KEYCLOAK_PUBLIC_URL=https://auth.<домен>` (Deploy без неё строит http-адрес) → Actions →
+   Deploy → Run workflow (любой сервис, тег текущий): gateway проверяет токены с новым issuer, UI ведёт на новый вход.
+   Выданные до перехода токены недействительны - пользователи входят заново.
+6. Проверить вход на `https://app.<домен>` и «Запуск демо». Затем закрыть http-порты: `UI_BIND=127.0.0.1`,
+   `GATEWAY_BIND=127.0.0.1` (Environment `test`, Deploy), `KEYCLOAK_BIND=127.0.0.1` (Infra) и перезапустить
+   `https-setup.sh` без `OLD_*` - http-адреса уйдут из redirect URI.
+
+Откат: удалить `TLS_DOMAIN` и `*_BIND`, вернуть прежний `KEYCLOAK_PUBLIC_URL`, Infra и Deploy; в realm -
+`sslRequired` обратно в `none` (админка → Realm settings → General).
+
 ## Доступ менеджеров
 
 Backend отдаёт менеджеру только его клиентов и предложения (`MANAGER_SCOPE=true`, по умолчанию). Перед выкатом:
@@ -269,6 +312,7 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `ML_WORKERS` | `1` | процессов uvicorn ml, не больше `ML_CPUS`, необязательно |
 | Variable | `KEYCLOAK_UI_CLIENT_ID` | `smart-factoring-ui` | клиент UI в realm стенда, необязательно, по умолчанию `smart-factoring-ui` |
 | Variable | `KEYCLOAK_REALM` | `smart-factoring-test` | realm стенда, необязательно, по умолчанию `smart-factoring-<окружение>` |
+| Variable | `UI_BIND`, `GATEWAY_BIND` | `127.0.0.1` | на каком адресе VDS публиковать порты UI и gateway: `0.0.0.0` (по умолчанию) или `127.0.0.1` - снаружи только через HTTPS-прокси |
 | Variable | `LLM_MODE` | `gigachat` | LLM backend: `stub` - шаблонные тексты (по умолчанию), `gigachat` - GigaChat API, `onprem` - LLM в контуре с API вида OpenAI, `off` - без черновика |
 | Secret | `GIGACHAT_AUTH_KEY` | | ключ авторизации GigaChat API из личного кабинета (Base64), обязателен при `LLM_MODE=gigachat` |
 | Variable | `LLM_MASK` | `true` | названия, ИНН, ОГРН и номер УПД уходят в LLM метками, по умолчанию `true`; `false` - как есть (только для LLM в контуре) |
@@ -302,6 +346,9 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `KEYCLOAK_TEST_USER` | `tester` | пользователь realm `smart-factoring-test`: латиница, цифры, `. _ -` |
 | Secret | `KEYCLOAK_TEST_USER_PASSWORD` | | его пароль |
 | Variable | `KEYCLOAK_PORT` | `8180` | публичный порт keycloak, необязательно, по умолчанию 8180 |
+| Variable | `TLS_DOMAIN` | `203-0-113-10.sslip.io` | домен TLS-прокси: `https://app\|api\|auth.<домен>`, сертификаты Let's Encrypt; пусто - без TLS. См. «HTTPS» |
+| Variable | `TLS_STAND` | `smart-factoring-test` | проект compose стенда за прокси, по умолчанию `smart-factoring-test` |
+| Variable | `KEYCLOAK_BIND` | `127.0.0.1` | на каком адресе VDS публиковать порт keycloak: `0.0.0.0` (по умолчанию) или `127.0.0.1` - только ssh-туннель, вход через https |
 | Variable | `KEYCLOAK_PUBLIC_URL` | `http://203.0.113.10:8180` | адрес keycloak для браузера и `iss` токенов, необязательно, по умолчанию `http://VDS_HOST:KEYCLOAK_PORT` |
 | Variable | `KEYCLOAK_TEST_GATEWAY_URL` | `http://203.0.113.10:8091` | адрес gateway test для redirect Swagger UI, необязательно, по умолчанию `http://VDS_HOST:GATEWAY_PORT` |
 | Variable | `KEYCLOAK_TEST_UI_URL` | `http://203.0.113.10:8071` | адрес UI test для redirect после входа, необязательно, по умолчанию `http://VDS_HOST:UI_PORT` |
