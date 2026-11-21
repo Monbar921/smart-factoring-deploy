@@ -17,6 +17,18 @@
       {
         "name": "user",
         "description": "Пользователь smart-factoring"
+      },
+      {
+        "name": "operator",
+        "description": "Экран процесса: загрузка данных и запуск анализа дебиторки"
+      },
+      {
+        "name": "manager",
+        "description": "Эмулятор CRM: свои клиенты (MANAGER_LOGINS) и решения по предложениям"
+      },
+      {
+        "name": "supervisor",
+        "description": "Руководитель: эмулятор CRM по всем менеджерам и прогоны, только просмотр"
       }
     ]
   },

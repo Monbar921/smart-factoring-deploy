@@ -1,5 +1,5 @@
 #!/bin/sh
-# Гостевой вход «Запуск демо» (замечания 28.10): роли operator и manager, конфиденциальный клиент для gateway
+# Гостевой вход «Запуск демо» (замечания 28.10): роли operator, manager и supervisor, конфиденциальный клиент для gateway
 # и демо-пользователь с обеими ролями в realm стенда. Повторный запуск ничего не дублирует: секрет клиента и пароль
 # пользователя обновляются.
 #
@@ -24,8 +24,8 @@ kcadm() {
 
 kcadm config credentials --server http://localhost:8080 --realm master --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null
 
-# роли, которые проверяет gateway (realm_access.roles)
-for role in operator manager; do
+# роли, которые проверяет gateway (realm_access.roles); supervisor - руководитель: CRM по всем менеджерам, только просмотр
+for role in operator manager supervisor; do
   if ! kcadm get "roles/$role" -r "$REALM" >/dev/null 2>&1; then
     kcadm create roles -r "$REALM" -s name="$role" >/dev/null
     echo "роль $role создана"
