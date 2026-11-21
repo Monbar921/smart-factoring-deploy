@@ -61,6 +61,10 @@ services:
       # роль supervisor и гостевой вход видят всех; MANAGER_SCOPE=false - проверка выключена
       MANAGER_SCOPE: ${MANAGER_SCOPE:-true}
       MANAGER_LOGINS: ${MANAGER_LOGINS:-}
+      # ночной анализ по расписанию (backend Р-85): cron Spring «сек мин час день месяц день недели», время московское;
+      # на тех же данных, что прошлый запуск, не запускается - отказ в «Попытках запуска»
+      RUN_SCHEDULE_ENABLED: ${RUN_SCHEDULE_ENABLED:-true}
+      RUN_SCHEDULE_CRON: ${RUN_SCHEDULE_CRON:-0 0 3 * * *}
       # одновременных запросов к GigaChat, не больше лимита тарифа (Freemium - 1 поток)
       LLM_PARALLELISM: ${LLM_PARALLELISM:-8}
       # предел токенов ответа на текст карточки; моделям с «мышлением» в контуре (DeepSeek-R1, Qwen3) - 2048 и больше

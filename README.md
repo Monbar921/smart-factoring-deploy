@@ -360,6 +360,8 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Secret | `ONPREM_LLM_API_KEY` | | ключ сервера моделей, если он его требует, необязательно |
 | Variable | `MANAGER_SCOPE` | `true` | менеджер видит только своих клиентов (НФР-9), по умолчанию `true`; `false` - все видят всех |
 | Variable | `MANAGER_LOGINS` | `anna:M1,boris:M2` | логин Keycloak и код менеджера из `managers.csv` через запятую; роль `supervisor` и гость видят всех; см. «Доступ менеджеров» |
+| Variable | `RUN_SCHEDULE_ENABLED` | `true` | ночной анализ дебиторки по расписанию, по умолчанию `true`; без новых данных не запускается (отказ - в «Попытках запуска») |
+| Variable | `RUN_SCHEDULE_CRON` | `0 0 3 * * *` | когда: cron Spring из 6 полей (сек мин час день месяц день недели), время московское, по умолчанию 03:00 |
 | Variable | `GUEST_ENABLED` | `true` | гостевой вход «Запуск демо», по умолчанию `false`; см. «Гостевой вход» |
 | Variable | `GUEST_USERNAME` | `demo` | демо-пользователь realm, необязательно |
 | Secret | `GUEST_CLIENT_SECRET` | | секрет клиента `smart-factoring-guest`, обязателен при `GUEST_ENABLED=true` |
