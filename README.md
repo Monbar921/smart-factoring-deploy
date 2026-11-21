@@ -186,6 +186,10 @@ Backend отдаёт менеджеру только его клиентов и 
 Сервер моделей поднимается отдельно: в сети стенда или на самом VDS - тогда
 `ONPREM_LLM_URL=http://host.docker.internal:11434/v1` (Ollama; адрес хоста backend видит через `extra_hosts`).
 
+Модели с «мышлением» (DeepSeek-R1, Qwen3) пишут рассуждение `<think>…</think>` перед ответом: backend его отбрасывает,
+но рассуждение тратит предел токенов - для них `LLM_MAX_TOKENS=2048` и больше. Проверить модель до выката - ручной тест
+`OnPremModeManualTest` в smart-factoring-backend (анализ фикстуры на этой модели).
+
 ## GigaChat
 
 Backend получает тексты карточек от GigaChat API при `LLM_MODE=gigachat` (переменная окружения стенда) и ключе
@@ -263,6 +267,7 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `LLM_MASK` | `true` | названия, ИНН, ОГРН и номер УПД уходят в LLM метками, по умолчанию `true`; `false` - как есть (только для LLM в контуре) |
 | Variable | `ONPREM_LLM_URL` | `http://ollama:11434/v1` | адрес API до `/chat/completions`, обязателен при `LLM_MODE=onprem` |
 | Variable | `ONPREM_LLM_MODEL` | `qwen2.5:7b-instruct` | модель на сервере (`GET /models`), обязательна при `LLM_MODE=onprem` |
+| Variable | `LLM_MAX_TOKENS` | `2048` | предел токенов ответа на текст карточки, по умолчанию 512; моделям с «мышлением» (DeepSeek-R1, Qwen3) - 2048 и больше |
 | Secret | `ONPREM_LLM_API_KEY` | | ключ сервера моделей, если он его требует, необязательно |
 | Variable | `MANAGER_SCOPE` | `true` | менеджер видит только своих клиентов (НФР-9), по умолчанию `true`; `false` - все видят всех |
 | Variable | `MANAGER_LOGINS` | `anna:M1,boris:M2` | логин Keycloak и код менеджера из `managers.csv` через запятую; роль `supervisor` и гость видят всех; см. «Доступ менеджеров» |

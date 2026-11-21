@@ -54,6 +54,8 @@ services:
       MANAGER_LOGINS: ${MANAGER_LOGINS:-}
       # одновременных запросов к GigaChat, не больше лимита тарифа (Freemium - 1 поток)
       LLM_PARALLELISM: ${LLM_PARALLELISM:-8}
+      # предел токенов ответа на текст карточки; моделям с «мышлением» в контуре (DeepSeek-R1, Qwen3) - 2048 и больше
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-512}
       # поле model запроса: GigaChat-2 (базовая), GigaChat-2-Pro, GigaChat-2-Max, GigaChat-3-Lightning, GigaChat-3-Pro, GigaChat-3-Ultra
       GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat-2}
       # ключ авторизации GigaChat API (Base64 client_id:client_secret), нужен только при LLM_MODE=gigachat
