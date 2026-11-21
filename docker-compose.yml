@@ -12,10 +12,19 @@
 # Порты приложений задаются через SERVER_PORT: Spring Boot берёт его вместо server.port из application.yml
 name: ${COMPOSE_PROJECT_NAME:-smart-factoring}
 
+# Логи контейнеров: json-file с ротацией - не больше 5 файлов по 10 МБ на сервис. Без неё логи (в них логины
+# пользователей) растут без предела и хранятся бессрочно (smart-factoring-backend docs/security.md, «Жизненный цикл данных»)
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   backend:
     image: ghcr.io/monbar921/smart-factoring-backend:${BACKEND_TAG:?BACKEND_TAG is required}
     restart: unless-stopped
+    logging: *logging
     # в образе нет ENTRYPOINT, команда запуска задаётся здесь
     command: [ "java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar" ]
     # backend переживает недоступность ml (оценки получат «ошибку оценки»), ждать его healthcheck не нужно
@@ -81,6 +90,7 @@ services:
   ml:
     image: ghcr.io/monbar921/smart-factoring-ml:${ML_TAG:?ML_TAG is required}
     restart: unless-stopped
+    logging: *logging
     # наружу не публикуется: в ml ходит только backend по сети стенда
     environment:
       # процессов uvicorn: оценки считаются на CPU, больше cpus смысла нет
@@ -104,6 +114,7 @@ services:
   gateway:
     image: ghcr.io/monbar921/smart-factoring-gateway:${GATEWAY_TAG:?GATEWAY_TAG is required}
     restart: unless-stopped
+    logging: *logging
     command: [ "java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar" ]
     # backend нужен gateway только при проксировании, не при старте: пока backend поднимается, gateway отвечает 5xx
     depends_on:
@@ -144,6 +155,7 @@ services:
   ui:
     image: ghcr.io/monbar921/smart-factoring-ui:${UI_TAG:?UI_TAG is required}
     restart: unless-stopped
+    logging: *logging
     # nginx находит gateway через DNS docker при каждом запросе: стартует и без него, пока gateway поднимается - 502
     depends_on:
       gateway:

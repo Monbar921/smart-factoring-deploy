@@ -6,10 +6,19 @@
 #   smart-factoring-auth - keycloak для gateway стендов (ключи подписи токенов), postgres оттуда не виден
 name: smart-factoring-infra
 
+# Логи контейнеров: json-file с ротацией - не больше 5 файлов по 10 МБ на сервис. Без неё логи (в них логины
+# пользователей) растут без предела и хранятся бессрочно (smart-factoring-backend docs/security.md, «Жизненный цикл данных»)
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:17.6-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       # создаются только при первом запуске пустого volume
       POSTGRES_DB: public
@@ -33,6 +42,7 @@ services:
     # Тот же образ, что quay.io/keycloak/keycloak:26.8.1 - дайджест совпадает, закреплён им
     image: keycloak/keycloak:26.8.1@sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244
     restart: unless-stopped
+    logging: *logging
     # --import-realm: realm-файлы из ./keycloak/realms импортируются, только если такого realm ещё нет
     command: [ "start", "--import-realm" ]
     depends_on:
@@ -92,6 +102,7 @@ services:
   proxy:
     image: caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb
     restart: unless-stopped
+    logging: *logging
     profiles: [ "tls" ]
     depends_on:
       keycloak:
