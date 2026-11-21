@@ -9,6 +9,7 @@
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "bruteForceProtected": true,
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and notUsername and notEmail and passwordHistory(3)",
   "accessTokenLifespan": 900,
   "ssoSessionIdleTimeout": 3600,
   "ssoSessionMaxLifespan": 36000,

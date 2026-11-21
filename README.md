@@ -229,6 +229,31 @@ Backend отдаёт менеджеру только его клиентов и 
 
 Гостевой вход «Запуск демо» видит всех менеджеров, как и раньше.
 
+## Пароли и второй фактор
+
+[infra/keycloak/security-setup.sh](infra/keycloak/security-setup.sh) (smart-factoring-backend `docs/security.md`,
+«Пароли и второй фактор»): политика паролей в realm стенда и в master (от 12 символов, заглавные и строчные буквы,
+цифры, не совпадает с логином и почтой, не повторяет 3 последних) и одноразовый код (OTP, приложение-аутентификатор)
+при входе через браузер для ролей `operator` и `supervisor` и для администратора Keycloak. Роль `otp-required` входит
+в `operator` и `supervisor`, поэтому новые пользователи с этими ролями получают OTP сами. Вход без браузера (гостевой
+вход «Запуск демо» через gateway, `kcadm`) не меняется. Проверено на Keycloak 26.8.1 локально 21.11.2026.
+
+1. После `guest-setup.sh` (нужны роли), на VDS в каталоге infra:
+   ```sh
+   set -a; . ./.env; set +a
+   REALM=smart-factoring-test sh keycloak/security-setup.sh
+   ```
+   Повторный запуск ничего не дублирует. В новом realm политика паролей есть из realm-файла, OTP - только скриптом.
+2. Сменить пароли, заданные до политики, на пароли по ней: `KEYCLOAK_ADMIN_PASSWORD` (админка → master → Users →
+   admin → Credentials), `KEYCLOAK_TEST_USER_PASSWORD` и `GUEST_PASSWORD` - в секретах окружения GitHub и в realm
+   (`guest-setup.sh` с новым `GUEST_PASSWORD`; слабый пароль Keycloak теперь не примет). Учётки команды - так же.
+3. Первый вход оператора, руководителя и администратора через браузер - экран «Mobile Authenticator Setup»:
+   QR-код в приложение (Google Authenticator, Яндекс Ключ, FreeOTP), затем код.
+4. Проверка: пароль `demo12345` при смене отклоняется («minimum length 12»), менеджер входит без кода, оператор - с кодом.
+
+Откат: админка → realm → Authentication → для browser flow выбрать `browser` (Bind flow); политика - Realm settings →
+Policies → Password policy.
+
 ## LLM в контуре
 
 `LLM_MODE=onprem` - backend ходит в сервер моделей с API вида OpenAI (vLLM, Ollama, llama.cpp, LM Studio) по
