@@ -1,0 +1,17 @@
+# Секреты в репозитории (.github/workflows/secret-scan.yml): правила gitleaks по умолчанию и исключения ниже.
+# Исключение добавлять только для заведомо несекретного: тестовые значения, шаблоны, публичные сертификаты.
+title = "smart-factoring"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Тесты, шаблоны настроек, публичные корневые сертификаты, бинарные артефакты"
+paths = [
+  '''(^|/)src/test/''',
+  '''(^|/)tests?/''',
+  '''\.test\.tsx?$''',
+  '''(^|/)\.env\.example$''',
+  '''(^|/)certs/[^/]*\.pem$''',
+  '''\.(pkl|xlsx|docx|pdf|zip|png|jpg|ico)$''',
+]
