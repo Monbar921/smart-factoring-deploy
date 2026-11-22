@@ -238,7 +238,9 @@ Backend отдаёт менеджеру только его клиентов и 
    ```
 
    Атрибут объявляется в профиле пользователя: видит и меняет его только администратор.
-3. Менеджеру - коды: админка → Users → пользователь → Details → «Коды менеджеров (managers.csv)», или kcadm:
+3. Менеджеру - коды из таблицы `manager` стенда (`select code from smart_factoring_test.manager`, например `MG-001`):
+   админка → Users → пользователь → Details → «Коды менеджеров (managers.csv)», или kcadm. Код `*` - все менеджеры
+   с правом решений (тестовая учётка, демо); пустой атрибут - ни одного. Только просмотр всех - роль `supervisor`.
 
    ```sh
    docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh update users/<id> -r smart-factoring-test      -s 'attributes.manager_code=["M1","M2"]'

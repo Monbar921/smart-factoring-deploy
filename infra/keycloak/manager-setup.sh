@@ -7,6 +7,7 @@
 # Что делает скрипт (повторный запуск ничего не дублирует):
 #   - объявляет атрибут manager_code в профиле пользователя realm (Keycloak 26 не хранит необъявленные атрибуты):
 #     несколько значений, видит и меняет только администратор - сам себе пользователь менеджеров не назначит;
+#     значение * - все менеджеры (тестовая учётка, демо); пустой атрибут - ни одного;
 #   - добавляет mapper manager-codes клиентам, чьи токены приходят в backend (CLIENTS).
 # В новом realm mapper уже есть из realm-файла, атрибут профиля - только этим скриптом.
 #
@@ -24,6 +25,10 @@ CLIENTS="${CLIENTS:-smart-factoring-ui smart-factoring-swagger}"
 ATTRIBUTE=manager_code
 CLAIM=manager_codes
 MAPPER=manager-codes
+# код из managers.csv или * - все менеджеры; без обратных слэшей, чтобы не экранировать их в JSON и sed
+PATTERN='^([*]|[A-Za-z0-9_-]+)$'
+# шаблон первой версии скрипта, без *: заменяется на PATTERN
+OLD_PATTERN='"\^\[A-Za-z0-9_-\]+\$"'
 
 # проект compose - из name: в infra/docker-compose.yml, а не из COMPOSE_PROJECT_NAME стенда (см. guest-setup.sh)
 kcadm() {
@@ -35,11 +40,16 @@ kcadm config credentials --server http://localhost:8080 --realm master --user "$
 # атрибут профиля: вставляется первым в список attributes, остальной профиль не меняется
 profile="$(kcadm get users/profile -r "$REALM")"
 if printf '%s' "$profile" | grep -q "\"name\" *: *\"$ATTRIBUTE\""; then
-  echo "атрибут $ATTRIBUTE уже объявлен"
+  if printf '%s' "$profile" | grep -q "$OLD_PATTERN"; then
+    printf '%s' "$profile" | sed "s/$OLD_PATTERN/\"$PATTERN\"/; s/код менеджера: латиница, цифры, _ и -\"/код менеджера (латиница, цифры, _ и -) или *\"/"       | kcadm update users/profile -r "$REALM" -f - >/dev/null
+    echo "атрибут $ATTRIBUTE: разрешено значение * (все менеджеры)"
+  else
+    echo "атрибут $ATTRIBUTE уже объявлен"
+  fi
 else
   attribute='{"name":"'"$ATTRIBUTE"'","displayName":"Коды менеджеров (managers.csv)","multivalued":true,'
   attribute="$attribute"'"permissions":{"view":["admin"],"edit":["admin"]},'
-  attribute="$attribute"'"validations":{"pattern":{"pattern":"^[A-Za-z0-9_-]+$","error-message":"код менеджера: латиница, цифры, _ и -"}}}'
+  attribute="$attribute"'"validations":{"pattern":{"pattern":"'"$PATTERN"'","error-message":"код менеджера (латиница, цифры, _ и -) или *"}}}'
   printf '%s' "$profile" | sed "0,/\"attributes\" *: *\[/s//&$attribute,/" | kcadm update users/profile -r "$REALM" -f - >/dev/null
   echo "атрибут $ATTRIBUTE объявлен в профиле пользователя"
 fi
