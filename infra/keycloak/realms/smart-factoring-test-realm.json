@@ -25,7 +25,7 @@
       },
       {
         "name": "manager",
-        "description": "Эмулятор CRM: свои клиенты (MANAGER_LOGINS) и решения по предложениям"
+        "description": "Эмулятор CRM: свои клиенты (атрибут manager_code, manager-setup.sh) и решения по предложениям"
       },
       {
         "name": "supervisor",
@@ -50,6 +50,23 @@
       ],
       "webOrigins": [
         "+"
+      ],
+      "protocolMappers": [
+        {
+          "name": "manager-codes",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "manager_code",
+            "claim.name": "manager_codes",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
@@ -76,6 +93,23 @@
       ],
       "webOrigins": [
         "+"
+      ],
+      "protocolMappers": [
+        {
+          "name": "manager-codes",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "manager_code",
+            "claim.name": "manager_codes",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",

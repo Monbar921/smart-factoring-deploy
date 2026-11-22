@@ -218,14 +218,33 @@ TLS на входе VDS - сервис `proxy` (Caddy) в infra: сам полу
 
 ## Доступ менеджеров
 
-Backend отдаёт менеджеру только его клиентов и предложения (`MANAGER_SCOPE=true`, по умолчанию). Перед выкатом:
+Backend отдаёт менеджеру только его клиентов и предложения (`MANAGER_SCOPE=true`, по умолчанию). Чей менеджер
+пользователь - решает Keycloak: атрибут пользователя `manager_code` (коды из `managers.csv`, в демо-данных `M1`;
+несколько значений - несколько менеджеров) mapper кладёт в access token claim `manager_codes`. Привязка хранится
+вместе с учётной записью, а не в переменных деплоя: новый менеджер не требует деплоя. На пилоте её отдаёт IAM банка
+(тот же claim или атрибут из LDAP/AD через user federation mapper). Перед выкатом:
 
 1. Роль `supervisor` создаёт `infra/keycloak/guest-setup.sh` (вместе с `operator` и `manager`; повторный запуск
    ничего не дублирует), в новом realm она есть из realm-файла. Выдать её тем, кто должен видеть всех менеджеров
    (команда, руководитель): Users → пользователь → Role mapping → Assign role → realm roles. Руководитель видит CRM
-   и прогоны, но не принимает решений по предложениям и не запускает анализ. Без неё пользователь только с ролью
-   `manager` и без строки в `MANAGER_LOGINS` увидит пустой список.
-2. Менеджерам - переменная `MANAGER_LOGINS`: `логин:код` через запятую, код - из `managers.csv` (в демо-данных `M1`).
+   и прогоны, но не принимает решений по предложениям и не запускает анализ. Без неё и без `manager_code`
+   пользователь видит в CRM пустой список.
+2. Атрибут и mapper - [infra/keycloak/manager-setup.sh](infra/keycloak/manager-setup.sh), на VDS в каталоге infra
+   (повторный запуск ничего не дублирует):
+
+   ```sh
+   set -a; . ./.env; set +a
+   REALM=smart-factoring-test sh keycloak/manager-setup.sh
+   ```
+
+   Атрибут объявляется в профиле пользователя: видит и меняет его только администратор.
+3. Менеджеру - коды: админка → Users → пользователь → Details → «Коды менеджеров (managers.csv)», или kcadm:
+
+   ```sh
+   docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh update users/<id> -r smart-factoring-test      -s 'attributes.manager_code=["M1","M2"]'
+   ```
+
+   Код действует со следующего токена (после повторного входа или обновления токена, до 15 минут).
 
 Гостевой вход «Запуск демо» видит всех менеджеров, как и раньше.
 
@@ -359,7 +378,6 @@ Settings → Environments → создать `test` и `prod`. В каждом:
 | Variable | `LLM_MAX_TOKENS` | `2048` | предел токенов ответа на текст карточки, по умолчанию 512; моделям с «мышлением» (DeepSeek-R1, Qwen3) - 2048 и больше |
 | Secret | `ONPREM_LLM_API_KEY` | | ключ сервера моделей, если он его требует, необязательно |
 | Variable | `MANAGER_SCOPE` | `true` | менеджер видит только своих клиентов (НФР-9), по умолчанию `true`; `false` - все видят всех |
-| Variable | `MANAGER_LOGINS` | `anna:M1,boris:M2` | логин Keycloak и код менеджера из `managers.csv` через запятую; роль `supervisor` и гость видят всех; см. «Доступ менеджеров» |
 | Variable | `GUEST_ENABLED` | `true` | гостевой вход «Запуск демо», по умолчанию `false`; см. «Гостевой вход» |
 | Variable | `GUEST_USERNAME` | `demo` | демо-пользователь realm, необязательно |
 | Secret | `GUEST_CLIENT_SECRET` | | секрет клиента `smart-factoring-guest`, обязателен при `GUEST_ENABLED=true` |

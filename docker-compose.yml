@@ -57,10 +57,10 @@ services:
       ONPREM_LLM_URL: ${ONPREM_LLM_URL:-}
       ONPREM_LLM_MODEL: ${ONPREM_LLM_MODEL:-}
       ONPREM_LLM_API_KEY: ${ONPREM_LLM_API_KEY:-}
-      # карточку и предложения видит только менеджер клиента (backend Р-75): «логин:код менеджера» через запятую;
-      # роль supervisor и гостевой вход видят всех; MANAGER_SCOPE=false - проверка выключена
+      # карточку и предложения видит только менеджер клиента (backend Р-75): коды менеджеров - атрибут manager_code
+      # пользователя в Keycloak (infra/keycloak/manager-setup.sh, Р-90); роль supervisor и гостевой вход видят всех;
+      # MANAGER_SCOPE=false - проверка выключена
       MANAGER_SCOPE: ${MANAGER_SCOPE:-true}
-      MANAGER_LOGINS: ${MANAGER_LOGINS:-}
       # одновременных запросов к GigaChat, не больше лимита тарифа (Freemium - 1 поток)
       LLM_PARALLELISM: ${LLM_PARALLELISM:-8}
       # предел токенов ответа на текст карточки; моделям с «мышлением» в контуре (DeepSeek-R1, Qwen3) - 2048 и больше

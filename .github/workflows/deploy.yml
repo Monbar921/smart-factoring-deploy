@@ -226,7 +226,6 @@ jobs:
           ONPREM_LLM_MODEL: ${{ vars.ONPREM_LLM_MODEL }}
           ONPREM_LLM_API_KEY: ${{ secrets.ONPREM_LLM_API_KEY }}
           MANAGER_SCOPE: ${{ vars.MANAGER_SCOPE }}
-          MANAGER_LOGINS: ${{ vars.MANAGER_LOGINS }}
           LLM_PARALLELISM: ${{ vars.LLM_PARALLELISM }}
           LLM_MAX_TOKENS: ${{ vars.LLM_MAX_TOKENS }}
           GIGACHAT_MODEL: ${{ vars.GIGACHAT_MODEL }}
@@ -248,7 +247,6 @@ jobs:
           check ONPREM_LLM_URL '^https?://[^[:space:]]+$' "адрес API до /chat/completions: http://ollama:11434/v1"
           check ONPREM_LLM_MODEL '^[A-Za-z0-9._:/-]+$' "имя модели на сервере: qwen2.5:7b-instruct, t-tech/T-lite-it-1.0"
           check MANAGER_SCOPE '^(true|false)$' "true или false"
-          check MANAGER_LOGINS '^[^:,[:space:]]+:[A-Za-z0-9_-]+( *, *[^:,[:space:]]+:[A-Za-z0-9_-]+)*$' "логин:код менеджера через запятую: anna:M1,boris:M2"
           check LLM_PARALLELISM '^[1-9][0-9]{0,2}$' "число одновременных запросов: 1, 8"
           check LLM_MAX_TOKENS '^[1-9][0-9]{1,4}$' "предел токенов ответа: 512, 2048"
           check GIGACHAT_MODEL '^[A-Za-z0-9._:-]+$' "имя модели: GigaChat-2, GigaChat-2-Pro"
@@ -330,7 +328,6 @@ jobs:
             echo "ONPREM_LLM_MODEL='${ONPREM_LLM_MODEL}'"
             echo "ONPREM_LLM_API_KEY='${ONPREM_LLM_API_KEY}'"
             echo "MANAGER_SCOPE=${MANAGER_SCOPE:-true}"
-            echo "MANAGER_LOGINS='${MANAGER_LOGINS}'"
             echo "GUEST_ENABLED=${GUEST_ENABLED:-false}"
             echo "GUEST_USERNAME=${GUEST_USERNAME:-demo}"
             echo "GUEST_CLIENT_SECRET='${GUEST_CLIENT_SECRET}'"
